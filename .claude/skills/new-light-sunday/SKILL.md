@@ -23,6 +23,10 @@ everything for a Sunday lands in `work\<date>\`.
 
 ## Step 0 — Preconditions
 
+- If today is **not Sunday** and the prompt doesn't explicitly name a date (or say TEST),
+  do nothing except email the recipient "New Light Sunday task ran on <weekday> — nothing
+  to do (it only processes Sunday recordings)" and STOP. Never fall back to last Sunday.
+
 - Gmail and OpusClip connectors must be available. If Gmail is missing, stop (you can't
   report anything). If OpusClip is missing, continue and note it in the summary.
 - `secrets\youtube.json` must have real values (not "PASTE ..."). If not, do everything
@@ -153,16 +157,20 @@ anything date-specific." If it errors, note the exact error in the summary (retr
 
 ## Step 7 — Slides
 
-`pipeline\nlc.cmd slides --date <date>` → `work\<date>\slide_1.png … slide_5.png`. Look at
-them; fix text in plan.json and re-run if anything overflows or reads poorly.
+`pipeline\nlc.cmd slides --date <date>` → `work\<date>\slide_1.png … slide_5.png`, also
+copied to `Dropbox\Instagram Slides\<date>\`. Look at them; fix text in plan.json and re-run
+if anything overflows or reads poorly. Then make a Dropbox shared link to the folder
+`/Instagram Slides/<date>` with the Dropbox connector's `create_shared_link` (wait a minute
+first if Dropbox hasn't synced it yet) for the email.
 
 ## Step 8 — Summary email, then mark done
 
 One email to `recipient_email` — subject "Sunday <date>: sermon, radio MP3 & songs ready"
 — with: message title/speaker; the YouTube link (+ privacy); OpusClip project link; the
 MP3 path; the song list (n, title, artist, length); the sermon range used and every cut
-made (with a few words each, so it's easy to spot-check); anything flagged. Attach the 5
-slides (base64, PNG). Then write `work\<date>\done.json` with the results.
+made (with a few words each, so it's easy to spot-check); anything flagged; and the
+Dropbox link to the Instagram slides. (Don't attach the slides — the link opens them on a
+phone, ready to post.) Then write `work\<date>\done.json` with the results.
 
 If any step fails in a way not covered above, still send the email explaining plainly what
 failed and what did get done.

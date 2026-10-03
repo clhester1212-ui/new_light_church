@@ -43,8 +43,7 @@ def die(msg):
 def sunday_of(date_str):
     if date_str:
         return dt.date.fromisoformat(date_str)
-    today = dt.date.today()
-    return today - dt.timedelta(days=(today.weekday() + 1) % 7)  # most recent Sunday (today if Sunday)
+    return dt.date.today()  # no silent fallback to an earlier Sunday
 
 
 def workdir(date):
@@ -447,6 +446,10 @@ def render_songs(plan, src, date, test_root=None):
     for n, song in enumerate(plan.get("songs", []), 1):
         name = f"{date.isoformat()} - {n} - {safe_name(song['title'])}.mp4"
         out = dest / name
+        if out.exists():  # never overwrite someone's existing (possibly full-quality) copy
+            log(f"Song already exists, leaving it alone: {out}")
+            outs.append(str(out))
+            continue
         ffmpeg("-ss", song["start"], "-to", song["end"], "-i", src,
                "-vf", "scale=-2:480", "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
                "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", out)
@@ -547,9 +550,16 @@ def cmd_slides(a):
         pg = f"{i}/{len(slides)}"
         d.text((W - M - d.textlength(pg, font=font(30)), H - M - 40), pg, font=font(30), fill=(200, 200, 200))
         out = wd / f"slide_{i}.png"
-        img.save(out, optimize=True)
+        # 128-colour palette: looks identical on a dark text slide, ~1/3 the size (cheap to email)
+        img.quantize(colors=128, dither=Image.Dither.NONE).save(out, optimize=True)
         outs.append(str(out))
+    # Also into Dropbox so they're on the phone, ready to post.
+    dest = Path(CONFIG["slides_folder"]) / date.isoformat()
+    dest.mkdir(parents=True, exist_ok=True)
+    for o in outs:
+        shutil.copy(o, dest)
     log("\n".join(outs))
+    log(f"Copied to {dest}")
 
 
 # ---------------------------------------------------------------- upload
