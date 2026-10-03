@@ -1,0 +1,20 @@
+{
+  "church_name": "New Light Church",
+  "church_invite": "New Light Church · Sundays 10am · 307 Chestnut St, Bladenboro, NC",
+  "recipient_email": "clhester1212@gmail.com",
+
+  "recording_drive_labels": ["Crucial X6"],
+  "recording_folders": ["C:\\Users\\NewLight\\Dropbox\\ATEM Recordings"],
+  "sermon_notes_folder": "C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Sermons",
+  "radio_folder": "C:\\Users\\NewLight\\Dropbox\\Radio Files",
+  "worship_songs_folder": "C:\\Users\\NewLight\\Dropbox\\Worship Songs",
+
+  "default_speaker": "Pastor Dale Hester",
+  "other_speakers": ["Pastor Corey Hester"],
+
+  "whisper_model": "small.en",
+  "sermon_crf": "18",
+  "sermon_x264_preset": "medium",
+  "youtube_privacy": "unlisted",
+  "brand_accent_rgb": [232, 176, 74]
+}

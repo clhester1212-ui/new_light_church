@@ -1,52 +1,50 @@
-# New Light sermon-recap skill — upload & wiring guide
+# New Light Church — Sunday media automation
 
-## What's in here
-```
-.claude/skills/new-light-sermon-recap/SKILL.md   <- the actual procedure (the skill)
-routine-prompt.md                                 <- the short Routine prompt that invokes it
-```
+Runs on the church laptop every **Sunday at 1:00 pm** (scheduled task in the Claude
+desktop app) and turns that morning's ATEM recording into everything below.
 
-## 1. Upload to your GitHub repo
-Copy the `.claude/skills/new-light-sermon-recap/` folder into the **root** of whatever
-repo you want the business account's Claude Code environment to use (create a new repo
-if you don't have one yet — it can be empty otherwise, even private). The `.claude/skills/`
-path is what Claude Code scans for repo-local skills, so the folder must sit at that
-exact path relative to the repo root, not nested inside another folder.
+## What it does each Sunday
 
-Commit and push it like any other file. `routine-prompt.md` and this README don't need
-to be in the repo — they're just instructions for you.
+1. **Finds the recording** — the `Worship…` file for that Sunday on whichever *Crucial X6*
+   drive is plugged in (D:), or in `Dropbox\ATEM Recordings`. Waits for sync to finish.
+2. **Reads the pastor's notes** from `Dropbox\Sound Booth\Sermons` (series, title, points,
+   scriptures).
+3. **Transcribes the service** on this laptop (Whisper — no YouTube captions needed).
+4. **Marks the sections** — each worship song, the sermon start → end of altar call, and
+   any date-specific parts (parking lot, announcements, "welcome radio & internet", events…).
+5. **Sermon video** — cut from the 1080p master, date-specific parts removed, lower thirds
+   ("Pastor Dale Hester" by default, "Pastor Corey Hester" when he preaches), high quality.
+6. **Uploads the sermon to YouTube** as **Unlisted** with title, description, tags.
+7. **Radio MP3** — `Dropbox\Radio Files\<year>\<date> - <Series WkN - Title>.mp3`.
+8. **Worship songs** — each song as a 480p reference video in
+   `Dropbox\Worship Songs\<date>\<date> - <n> - <Song>.mp4`, and adds them to `Song Log.csv`.
+9. **OpusClip** — sends the new sermon video for social clips.
+10. **Instagram** — 5 recap slides from what was actually preached.
+11. **Emails a summary** to clhester1212@gmail.com with links, the cuts made (to spot-check),
+    and the slides attached.
 
-## 2. Connect that repo to your business Claude account
-On claude.ai (business account) → Settings → Connectors / GitHub, connect GitHub if not
-already connected, and install the Claude GitHub App on that repo if prompted
-(https://claude.ai/connect-github). Then start a Claude Code on the web session and pick
-that repo as the session's source — a session only sees the skill once the repo is
-attached when it starts.
+## Setup checklist
 
-Once attached, `new-light-sermon-recap` should show up in that session's available-skills
-listing.
+- [x] Git, Python 3.12, ffmpeg, yt-dlp installed
+- [x] Repo cloned to `C:\Users\NewLight\new_light_church`
+- [x] Gmail connector
+- [x] OpusClip connector
+- [x] Dropbox desktop sync (`C:\Users\NewLight\Dropbox`), Worship Songs folder joined
+- [ ] YouTube credentials pasted into `secrets\youtube.json` (never committed)
+- [ ] Scheduled task "New Light — Sunday 1pm media pipeline" created in the Claude app
+- [ ] Laptop on, Claude app open, X6 drive plugged in on Sundays at 1pm
 
-## 3. One-time environment setup (same as before)
-- Connect Gmail and OpusClip at claude.ai/customize/connectors (business account).
-- In the environment's settings (cloud environment menu → Edit → environment variables),
-  add: `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` — same values
-  as the current live Routine (not repeated here on purpose — pull them from the existing
-  Routine or wherever you have them stored).
-- Optionally add `RECIPIENT_EMAIL` as an env var if status emails should go somewhere
-  other than clhester1212@gmail.com — the skill checks for it and falls back to that
-  address if it's unset.
+## Files
 
-## 4. Create the Routine
-Paste `routine-prompt.md`'s content into that same Claude Code session and ask it to
-create the Routine with the settings listed there.
+| Path | What |
+|---|---|
+| `.claude/skills/new-light-sunday/SKILL.md` | The procedure Claude follows (judgment calls) |
+| `pipeline/nlc.py` (`nlc.cmd` launcher) | The mechanical steps: find, notes, transcribe, render, slides, upload |
+| `config.json` | Folders, default speaker, quality, YouTube privacy |
+| `secrets/youtube.json` | YouTube OAuth credentials — gitignored |
+| `work/<date>/` | Per-Sunday working files (transcript, plan, sermon.mp4, slides) — gitignored |
 
-## Why split it this way
-The old version had the entire 7-step procedure typed directly into the Routine's
-stored prompt. Keeping the procedure in git instead means:
-- you can read/diff/review changes to the logic like any other code,
-- the same skill can back multiple Routines (e.g. a manual "run it now" trigger) without
-  duplicating the text,
-- updating the process is a normal commit + push, not re-typing a wall of text into a
-  Routine's prompt field.
+## Run it by hand
 
-The Routine itself stays tiny — it only carries the schedule and "go run this skill."
+Ask Claude in a session opened on this folder: *"Run the new-light-sunday skill for today"*,
+or for a dry run on a past Sunday: *"Run the new-light-sunday skill in TEST mode for 2026-09-27"*.
