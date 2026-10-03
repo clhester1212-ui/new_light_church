@@ -130,6 +130,8 @@ title / big idea as a hook; 2–4 = one key point each (15–25 words, the pasto
   updates `Dropbox\Worship Songs\Song Log.csv`.
 - `work\<date>\sermon.mp4` — the edited sermon, 1080p, with lower thirds.
 - `Dropbox\Radio Files\<year>\<date> - <file_title>.mp3` — the sermon audio for radio.
+- `work\<date>\<date> - Resolve timeline.fcpxml` — the same edit as a DaVinci Resolve
+  timeline (File → Import → Timeline) for hand fine-tuning. Mention its path in the email.
 
 Then spot-check: extract a frame at the first lower third
 (`ffmpeg -ss 6 -i work\<date>\sermon.mp4 -frames:v 1 work\<date>\check_lt.png`) and look at

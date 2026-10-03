@@ -473,6 +473,57 @@ def render_songs(plan, src, date, test_root=None):
     return outs
 
 
+def write_resolve_timeline(plan, src, keeps, wd, date):
+    """FCPXML of the same edit — Resolve (free) → File → Import → Timeline, to fine-tune by hand."""
+    from urllib.parse import quote
+    from xml.sax.saxutils import escape
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                          "stream=r_frame_rate", "-of", "csv=p=0", str(src)], capture_output=True, text=True).stdout
+    rate = next(l for l in out.split() if "/" in l)  # ATEM files list the stream twice
+    num, den = (int(x) for x in rate.split("/"))
+    fd = f"{den}/{num}s"  # frame duration
+    fr = lambda sec: f"{round(sec * num / den) * den}/{num}s"  # frame-aligned time
+    total_src = duration(src)
+    url = "file:///" + quote(str(src).replace("\\", "/"), safe="/:")
+    title = escape(f"{date.isoformat()} - {plan['file_title']}")
+    clips, offset = [], 0.0
+    lts = plan.get("lower_thirds") or [{"at": 4, "duration": 8}]
+    for a, b in keeps:
+        marks = "".join(
+            f'<marker start="{fr(a + lt["at"] - offset)}" duration="{fd}" '
+            f'value="{escape("Lower third: " + plan["speaker"])}"/>'
+            for lt in lts if offset <= lt["at"] < offset + (b - a))
+        clips.append(f'<asset-clip ref="r2" offset="{fr(offset)}" name="{escape(Path(src).name)}" '
+                     f'start="{fr(a)}" duration="{fr(b - a)}" format="r1" tcFormat="NDF">{marks}</asset-clip>')
+        offset += b - a
+    xml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.9">
+  <resources>
+    <format id="r1" frameDuration="{fd}" width="1920" height="1080"/>
+    <asset id="r2" name="{escape(Path(src).name)}" start="0s" duration="{fr(total_src)}" hasVideo="1" hasAudio="1" format="r1" audioSources="1" audioChannels="2" audioRate="48000">
+      <media-rep kind="original-media" src="{url}"/>
+    </asset>
+  </resources>
+  <library>
+    <event name="New Light Sermons">
+      <project name="{title}">
+        <sequence format="r1" duration="{fr(offset)}" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">
+          <spine>
+            {chr(10).join("            " + c for c in clips).strip()}
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>
+'''
+    p = wd / f"{date.isoformat()} - Resolve timeline.fcpxml"
+    p.write_text(xml, encoding="utf-8")
+    log(f"Resolve timeline: {p}")
+    return p
+
+
 def cmd_render(a):
     date = sunday_of(a.date)
     wd = workdir(date)
@@ -484,10 +535,18 @@ def cmd_render(a):
     results = {}
     if not a.skip_songs:
         results["songs"] = render_songs(plan, src, date, test_root)
+    if a.timeline_only:  # just (re)build the Resolve timeline from the plan
+        ps = pauses(date)
+        s = plan["sermon"]
+        keeps = keep_ranges(snap(s["start"], ps), snap(s["end"], ps),
+                            [[snap(x, ps), snap(y, ps)] for x, y in s.get("cuts", [])])
+        write_resolve_timeline(plan, src, keeps, wd, date)
+        return
     sermon, keeps = render_sermon(plan, src, wd, date)
     results["sermon_video"] = str(sermon)
     results["sermon_kept_ranges"] = [[round(x, 2), round(y, 2)] for x, y in keeps]
     results["radio_mp3"] = str(render_mp3(plan, sermon, date, test_root))
+    results["resolve_timeline"] = str(write_resolve_timeline(plan, src, keeps, wd, date))
     save_json(wd / "render_results.json", results)
     log(json.dumps(results, indent=2))
 
@@ -672,6 +731,7 @@ def main():
         if name == "render":
             p.add_argument("--skip-songs", action="store_true")
             p.add_argument("--test", action="store_true", help="write songs/MP3 under work/<date>/TEST OUTPUT")
+            p.add_argument("--timeline-only", action="store_true", help="only write the Resolve timeline")
         if name == "upload":
             p.add_argument("--privacy", choices=["private", "unlisted", "public"])
     a = ap.parse_args()
