@@ -565,7 +565,8 @@ def youtube_creds():
         die(f"YouTube credentials missing: {', '.join(missing)} — fill in secrets/youtube.json")
     from google.oauth2.credentials import Credentials
     return Credentials(None, refresh_token=c["refresh_token"], client_id=c["client_id"],
-                       client_secret=c["client_secret"], token_uri="https://oauth2.googleapis.com/token")
+                       client_secret=c["client_secret"], token_uri="https://oauth2.googleapis.com/token",
+                       scopes=YOUTUBE_SCOPES)
 
 
 def cmd_upload(a):
@@ -591,13 +592,70 @@ def cmd_upload(a):
     log(json.dumps(res, indent=2))
 
 
+YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
+                  "https://www.googleapis.com/auth/youtube.force-ssl"]
+
+
+def cmd_youtube_login(a):
+    """One-time: sign in to the church's YouTube channel in the browser and save a refresh
+    token to secrets/youtube.json. Needs the OAuth client file from Google Cloud Console
+    saved as secrets/client_secret.json (Desktop app type)."""
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    cs = ROOT / "secrets" / "client_secret.json"
+    if not cs.exists():
+        found = sorted((Path.home() / "Downloads").glob("client_secret*.json"), key=lambda p: p.stat().st_mtime)
+        if not found:
+            die("Download the OAuth client JSON from Google Cloud Console first "
+                "(it lands in Downloads as client_secret_....json).")
+        shutil.copy(found[-1], cs)
+        log(f"Using {found[-1].name} from Downloads")
+    flow = InstalledAppFlow.from_client_secrets_file(str(cs), YOUTUBE_SCOPES)
+    log("A browser window is opening — sign in with the Google account that owns the "
+        "New Light YouTube channel and click Allow.")
+    creds = flow.run_local_server(port=0, prompt="consent", access_type="offline")
+    info = json.loads(cs.read_text())
+    info = info.get("installed") or info.get("web")
+    save_json(ROOT / "secrets" / "youtube.json", {"client_id": info["client_id"],
+                                                  "client_secret": info["client_secret"],
+                                                  "refresh_token": creds.refresh_token})
+    from googleapiclient.discovery import build
+    me = build("youtube", "v3", credentials=creds, cache_discovery=False).channels().list(
+        part="snippet", mine=True).execute()
+    names = [c["snippet"]["title"] for c in me.get("items", [])]
+    log(f"Saved YouTube sign-in to secrets/youtube.json. Channel: {', '.join(names) or '(none found!)'}")
+
+
+def cmd_opus_upload(a):
+    """Upload a ~1 GB copy of the sermon to the OpusClip signed URL (from opusclip_create_upload_link)."""
+    import requests
+    date = sunday_of(a.date)
+    wd = workdir(date)
+    proxy = wd / "sermon_opus.mp4"
+    if not proxy.exists():
+        log("Making a smaller copy for OpusClip...")
+        ffmpeg("-i", wd / "sermon.mp4", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27",
+               "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", proxy)
+    r = requests.post(a.url, headers={"x-goog-resumable": "start", "Content-Length": "0"}, timeout=60)
+    r.raise_for_status()
+    session = r.headers["Location"]
+    size = proxy.stat().st_size
+    log(f"Uploading {size / 1e9:.2f} GB to OpusClip...")
+    with open(proxy, "rb") as fh:
+        r = requests.put(session, data=fh, headers={"Content-Length": str(size)}, timeout=3600)
+    r.raise_for_status()
+    log("OpusClip upload complete.")
+
+
 # ---------------------------------------------------------------- main
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("find", "notes", "transcribe", "audiomap", "render", "slides", "upload"):
+    for name in ("find", "notes", "transcribe", "audiomap", "render", "slides", "upload",
+                 "youtube-login", "opus-upload"):
         p = sub.add_parser(name)
+        if name == "opus-upload":
+            p.add_argument("--url", required=True, help="upload_url from opusclip_create_upload_link")
         p.add_argument("--date", help="the Sunday, YYYY-MM-DD (default: most recent Sunday)")
         if name == "find":
             p.add_argument("--no-wait", action="store_true", help="don't wait for sync to settle")
@@ -607,7 +665,7 @@ def main():
         if name == "upload":
             p.add_argument("--privacy", choices=["private", "unlisted", "public"])
     a = ap.parse_args()
-    globals()[f"cmd_{a.cmd}"](a)
+    globals()[f"cmd_{a.cmd.replace('-', '_')}"](a)
 
 
 if __name__ == "__main__":

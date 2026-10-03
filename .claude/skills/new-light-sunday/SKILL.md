@@ -134,13 +134,18 @@ it, and re-read the transcript around every cut once more.
 ## Step 5 — YouTube
 
 `pipeline\nlc.cmd upload --date <date>` (uploads `unlisted` by default; `--privacy private`
-in test mode). Writes `work\<date>\youtube_result.json` with the URL.
+in test mode). Writes `work\<date>\youtube_result.json` with the URL. Note: YouTube forces
+API uploads from an unaudited Google Cloud project to **private** — if that happens, say in
+the email that the video needs one click in YouTube Studio to set it Unlisted/Public.
+If `secrets\youtube.json` is missing or sign-in fails, skip this step and say so.
 
 ## Step 6 — OpusClip
 
-First `opusclip_list_projects` and skip if a project already has
-`source_video_id` = the new YouTube video id. Otherwise `opusclip_submit_project` with
-`videoUrl` = the new YouTube URL (unlisted works; private does not), `model` =
+First `opusclip_list_projects` and skip if a project titled "<date> — …" already exists.
+Upload the sermon file directly (works whatever the YouTube privacy is):
+`opusclip_create_upload_link` (`sizeMb` ≈ 1500, `fileName` = "<date> sermon.mp4"), then
+`pipeline\nlc.cmd opus-upload --date <date> --url "<upload_url>"` (makes a ~1 GB copy and
+uploads it), then `opusclip_submit_project` with `videoUrl` = the `upload_id`, `model` =
 "ClipAnything", `enableAutoHook` = true, `title` = "<date> — <Message Title>",
 `customPrompt` = "Find the strongest, most shareable moments from this sermon for church
 social media clips — clear teaching points, personal stories, and calls to action. Avoid
