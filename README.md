@@ -42,7 +42,34 @@ desktop app) and turns that morning's ATEM recording into everything below.
 | `pipeline/nlc.py` (`nlc.cmd` launcher) | The mechanical steps: find, notes, transcribe, render, slides, upload |
 | `config.json` | Folders, default speaker, quality, YouTube privacy |
 | `secrets/youtube.json` | YouTube OAuth credentials — gitignored |
+| `slackbot/francis.py` (`francis.cmd` launcher) | Slack bot that relays your messages to Claude here |
+| `secrets/slack.json` | Slack tokens + your Slack user ID for Francis — gitignored |
 | `work/<date>/` | Per-Sunday working files (transcript, plan, sermon.mp4, slides) — gitignored |
+
+## Francis — message this computer from Slack
+
+`slackbot/francis.py` is a small Slack bot. DM **Francis** from your phone ("the email
+misspelled my name, can we fix that?") and it runs Claude Code here in this folder, then
+replies in the thread. Replying in the same thread continues that conversation. It only
+listens to the Slack user in `secrets/slack.json` → `allowed_user_id`, runs Claude in
+`auto` permission mode, and asks in the thread before anything public or hard to undo.
+It starts at login (shortcut in the Windows Startup folder); log: `work/francis.log`.
+
+One-time setup:
+1. **Sign Claude in** with the church account: open a terminal and run
+   `& (Get-ChildItem "$env:LOCALAPPDATA\Packages\Claude_*\LocalCache\Roaming\Claude\claude-code" -Recurse -Filter claude.exe | Sort LastWriteTime | Select -Last 1).FullName auth login`
+2. **Create the Slack app**: api.slack.com/apps → *Create New App* → *From a manifest* → pick
+   your workspace → paste `slackbot/slack-app-manifest.yaml` → *Create* → *Install to Workspace*.
+3. **Save the two tokens**: copy each one, then double-click `slackbot\save-slack-key.cmd`
+   (it puts the clipboard key in `secrets/slack.json`). The Bot User OAuth Token (`xoxb-…`) is
+   under *OAuth & Permissions*; the app-level token (`xapp-…`) under *Basic Information* →
+   *App-Level Tokens* → *Generate* with scope `connections:write`. Check with
+   `slackbot\check-slack-keys.ps1`.
+4. **Start it** (double-click `slackbot\francis.cmd`), DM Francis anything — it replies with
+   your Slack user ID. Put that in `allowed_user_id`, then restart (end `pythonw.exe` in Task
+   Manager and double-click `francis.cmd` again).
+
+The laptop must be on, awake and signed in for Francis to answer.
 
 ## Run it by hand
 
