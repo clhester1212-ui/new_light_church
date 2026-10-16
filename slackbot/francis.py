@@ -1,8 +1,9 @@
 """Francis: a Slack bot that relays your messages to Claude Code on this computer.
 
 DM the bot (or @mention it) from your phone. Each Slack thread is one Claude
-conversation, so replies in the same thread keep context. Only the Slack user
-in secrets/slack.json "allowed_user_id" is listened to; everyone else is ignored.
+conversation, so replies in the same thread keep context. Only the Slack users
+in secrets/slack.json "allowed_user_ids" are listened to; anyone else just gets
+told their Slack user ID.
 
 Run:  slackbot\\francis.cmd   (also starts automatically at login)
 """
@@ -99,7 +100,9 @@ def chunks(text, size=3500):
 
 def main():
     cfg = load_json(SECRETS, {})
-    allowed = cfg.get("allowed_user_id", "").strip()
+    allowed = set(cfg.get("allowed_user_ids", []))
+    if cfg.get("allowed_user_id", "").strip():
+        allowed.add(cfg["allowed_user_id"].strip())
     mode = cfg.get("permission_mode", "auto")
     app = App(token=cfg["bot_token"])
     bot_user = app.client.auth_test()["user_id"]
@@ -136,12 +139,10 @@ def main():
         if event.get("bot_id") or event.get("subtype"):
             return
         user = event.get("user", "")
-        if not allowed:
-            say(f"Your Slack user ID is `{user}`. Put it in secrets/slack.json as "
-                f"\"allowed_user_id\", then restart Francis.")
-            return
-        if user != allowed:
+        if user not in allowed:
             log(f"ignored message from {user}")
+            say(f"Francis doesn't take requests from you yet. Your Slack user ID is `{user}`; "
+                f"ask the church office to add it to \"allowed_user_ids\" in secrets/slack.json.")
             return
         text = event.get("text", "").replace(f"<@{bot_user}>", "").strip()
         if not text:

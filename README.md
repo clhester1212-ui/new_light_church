@@ -51,7 +51,7 @@ desktop app) and turns that morning's ATEM recording into everything below.
 `slackbot/francis.py` is a small Slack bot. DM **Francis** from your phone ("the email
 misspelled my name, can we fix that?") and it runs Claude Code here in this folder, then
 replies in the thread. Replying in the same thread continues that conversation. It only
-listens to the Slack user in `secrets/slack.json` → `allowed_user_id`, runs Claude in
+listens to the Slack users in `secrets/slack.json` → `allowed_user_ids`, runs Claude in
 `auto` permission mode, and asks in the thread before anything public or hard to undo.
 It starts at login (shortcut in the Windows Startup folder); log: `work/francis.log`.
 
@@ -66,7 +66,7 @@ One-time setup:
    *App-Level Tokens* → *Generate* with scope `connections:write`. Check with
    `slackbot\check-slack-keys.ps1`.
 4. **Start it** (double-click `slackbot\francis.cmd`), DM Francis anything — it replies with
-   your Slack user ID. Put that in `allowed_user_id`, then restart (end `pythonw.exe` in Task
+   your Slack user ID. Add it to the `allowed_user_ids` list, then restart (end `pythonw.exe` in Task
    Manager and double-click `francis.cmd` again).
 
 The laptop must be on, awake and signed in for Francis to answer.
