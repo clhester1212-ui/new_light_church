@@ -2,20 +2,33 @@
   "church_name": "New Light Church",
   "church_invite": "New Light Church · Sundays 10am · 307 Chestnut St, Bladenboro, NC",
   "recipient_email": "clhester1212@gmail.com",
+  "summary_also_to": ["Brad@rossnell.com"],
+  "slack_report_user_id": "UG1SCAY6T",
+  "singers": ["Josh Bryant", "Jordan Allen", "Austin Stone", "Alana Fipps", "Shelley Howard",
+              "Alison Carroll", "Hayley Batten", "Karen Jackson"],
 
   "recording_drive_labels": ["Crucial X6"],
-  "recording_folders": ["C:\\Users\\NewLight\\Dropbox\\ATEM Recordings"],
+  "recording_folders": [],
+  "process_recordings_since": "2026-10-11",
+  "min_recording_gb": 0.5,
   "sermon_notes_folder": "C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Sermons",
-  "radio_folder": "C:\\Users\\NewLight\\Dropbox\\Radio Files",
-  "worship_songs_folder": "C:\\Users\\NewLight\\Dropbox\\Worship Songs",
-  "slides_folder": "C:\\Users\\NewLight\\Dropbox\\Instagram Slides",
+
+  "worship_songs_folder": "G:\\Shared drives\\Worship",
+  "sermons_folder": "G:\\Shared drives\\Sermons Videos",
+  "media_folder": "G:\\Shared drives\\Media",
+  "sermon_mp3_folder": "G:\\Shared drives\\Media\\Sermon MP3s",
 
   "default_speaker": "Pastor Dale Hester",
-  "other_speakers": ["Pastor Corey Hester"],
+  "other_speakers": ["Pastor Cory Hester"],
 
   "whisper_model": "small.en",
   "sermon_crf": "18",
   "sermon_x264_preset": "medium",
   "youtube_privacy": "unlisted",
-  "brand_accent_rgb": [232, 176, 74]
+  "brand_accent_rgb": [232, 176, 74],
+
+  "series_art": {
+    "Growth Rings": {"path": "C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Props\\Carved Growth Rings Log Poster.png",
+                     "badge_crop": [0.138, 0.138, 0.879, 0.882], "accent": [255, 140, 40]}
+  }
 }

@@ -8,6 +8,8 @@ song and where the band worked on it, and writes plan.json. This script does the
   practice.cmd render --key KEY         cut each song at 480p into Worship\Practice Worship Files
 
 KEY is "<date>_<file stem>", printed by `pending`. Working files: work/practice/<KEY>/.
+A recording counts as practice if its name starts with "Practice" OR it was recorded on a
+Wednesday between 6 and 8 pm (the band's practice slot), whatever it's named.
 Practice recordings are dated by when they were recorded (file modified time) — the ATEM
 re-uses old names (e.g. "Practice_9_30_2026 02.mp4" was recorded 2026-10-07).
 """
@@ -40,14 +42,37 @@ def recordings():
             continue
         for f in root.glob("*.mp4"):
             n = f.name.lower()
-            if not n.startswith("practice") or "conflict" in n or n.startswith("._"):
+            if "conflict" in n or n.startswith("._"):
                 continue
             if f.stat().st_size < min_bytes:  # false starts / stubs
                 continue
             recorded = dt.datetime.fromtimestamp(f.stat().st_mtime)
+            if not n.startswith("practice") and not wednesday_practice(f, recorded):
+                continue
             key = f"{recorded.date().isoformat()}_{safe_name(f.stem).replace(' ', '_')}"
             found[key] = f
     return dict(sorted(found.items()))
+
+
+def wednesday_practice(f, ended):
+    """Anything recorded Wednesday 6-8 pm is practice, whatever the ATEM named it.
+
+    The file's modified time is when recording stopped, so back off the length to get the
+    start, and count it if any part of the recording falls inside the window.
+    """
+    if ended.date() < dt.date.fromisoformat(CONFIG.get("practice_wednesday_since", "2026-10-08")):
+        return False
+    # Cheap check before probing the file: it must have stopped Wednesday evening or overnight.
+    if not ((ended.weekday() == 2 and ended.hour >= 18) or (ended.weekday() == 3 and ended.hour < 6)):
+        return False
+    try:
+        started = ended - dt.timedelta(seconds=duration(f))
+    except (ValueError, OSError):
+        return False
+    wed = ended.date() - dt.timedelta(days=ended.weekday() - 2)  # the Wednesday it stopped on (or after)
+    win_start = dt.datetime.combine(wed, dt.time(18))
+    win_end = dt.datetime.combine(wed, dt.time(20))
+    return started < win_end and ended > win_start
 
 
 def pwd(key):

@@ -1,15 +1,17 @@
-"""New Light Church Sunday pipeline — the mechanical half.
+r"""New Light Church Sunday pipeline — the mechanical half.
 
 Claude (via the new-light-sunday skill) makes the judgment calls — where the songs and
 sermon are, what's date-specific, titles/descriptions — and writes them to plan.json.
 This script does everything deterministic around that:
 
+  python pipeline/nlc.py pending                           next new recording on the X6 drive (or NONE)
   python pipeline/nlc.py find        [--date YYYY-MM-DD]   locate that Sunday's Worship recording
   python pipeline/nlc.py notes       [--date YYYY-MM-DD]   print that week's sermon notes file
   python pipeline/nlc.py transcribe  --date YYYY-MM-DD     transcribe the recording (local Whisper)
   python pipeline/nlc.py render      --date YYYY-MM-DD     cut sermon (1080p) + radio MP3 + songs (480p)
   python pipeline/nlc.py slides      --date YYYY-MM-DD     build the 5 Instagram slides
   python pipeline/nlc.py upload      --date YYYY-MM-DD     upload the sermon video to YouTube
+  python pipeline/nlc.py drive-link  --path "G:\Shared drives\..."   Google Drive link for a synced folder or file
 
 Everything for one Sunday lives in work/<date>/ (gitignored).
 """
@@ -135,12 +137,32 @@ def search_roots():
     return [r for r in roots if r.exists()]
 
 
+def started_around_10am(f):
+    """True if the recording began on a Sunday morning between 9:00 and 11:30 — the start is
+    the file's last-write time minus its length (creation times don't survive copying)."""
+    try:
+        end = dt.datetime.fromtimestamp(f.stat().st_mtime)
+        start = end - dt.timedelta(seconds=duration(f))
+    except Exception:
+        return False
+    return start.weekday() == 6 and dt.time(9, 0) <= start.time() <= dt.time(11, 30)
+
+
+def is_service_recording(f):
+    """A Sunday service recording: named "Worship…", or any other recording (not a practice
+    file) that started around 10am on a Sunday — that's the service, whatever it's called."""
+    n = f.name.lower()
+    if "conflict" in n or n.startswith("._") or n.startswith("practice"):
+        return False
+    return n.startswith("worship") or started_around_10am(f)
+
+
 def find_recording(date):
     hits = []
     for root in search_roots():
         for f in root.glob("*.mp4"):
             n = f.name
-            if not n.lower().startswith("worship") or "conflict" in n.lower() or n.startswith("._"):
+            if not is_service_recording(f):
                 continue
             named = date_in_name(n)
             modified = dt.date.fromtimestamp(f.stat().st_mtime)
@@ -169,7 +191,7 @@ def cmd_find(a):
     date = sunday_of(a.date)
     f, all_hits = find_recording(date)
     if not f:
-        die(f"No 'Worship…' recording dated {date} in: " + ", ".join(map(str, search_roots())))
+        die(f"No service recording (named 'Worship…' or started ~10am) dated {date} in: " + ", ".join(map(str, search_roots())))
     log(f"Found {len(all_hits)} candidate(s); using the largest:")
     for h in all_hits:
         log(f"  {'*' if h == f else ' '} {h}  ({h.stat().st_size / 1e9:.1f} GB)")
@@ -180,6 +202,44 @@ def cmd_find(a):
     info = {"date": date.isoformat(), "source": str(f), "duration": duration(f)}
     save_json(workdir(date) / "source.json", info)
     log(json.dumps(info, indent=2))
+
+
+LOCK_HOURS = 8  # a run that hasn't finished after this long is assumed to have died
+
+
+def recording_date(f):
+    return date_in_name(f.name) or dt.date.fromtimestamp(f.stat().st_mtime)
+
+
+def cmd_pending(a):
+    """The routine polls this every few minutes: is there a new, unprocessed Sunday recording
+    on a plugged-in X6 drive? Prints JSON {date, source} for the oldest one, or NONE."""
+    since = dt.date.fromisoformat(CONFIG["process_recordings_since"])
+    found = {}
+    for root in search_roots():
+        for f in root.glob("*.mp4"):
+            if f.stat().st_size < CONFIG["min_recording_gb"] * 1e9:  # stubs / false starts
+                continue
+            if not is_service_recording(f):
+                continue
+            d = recording_date(f)
+            if d < since or d.weekday() != 6:  # Sundays only
+                continue
+            if d not in found or f.stat().st_size > found[d].stat().st_size:
+                found[d] = f
+    for d in sorted(found):
+        wd = WORK / d.isoformat()
+        if (wd / "done.json").exists():
+            continue
+        lock = wd / "running.json"
+        if lock.exists() and time.time() - lock.stat().st_mtime < LOCK_HOURS * 3600:
+            continue  # another run is working on it
+        if a.claim:
+            workdir(d)
+            save_json(lock, {"started": dt.datetime.now().isoformat(timespec="seconds"), "source": str(found[d])})
+        log(json.dumps({"date": d.isoformat(), "source": str(found[d])}))
+        return
+    log("NONE")
 
 
 # ---------------------------------------------------------------- notes
@@ -423,8 +483,14 @@ def mmss(sec):
     return f"{sec // 60}:{sec % 60:02d}"
 
 
+def sermon_folder(plan, date, test_root=None):
+    """Sermons/<year>/<date> - <file_title>/ on the Google Drive shared drive."""
+    root = test_root / "Sermons" if test_root else Path(CONFIG["sermons_folder"])
+    return root / str(date.year) / f"{date.isoformat()} - {safe_name(plan['file_title'])}"
+
+
 def render_mp3(plan, sermon_mp4, date, test_root=None):
-    folder = (test_root / "Radio Files" if test_root else Path(CONFIG["radio_folder"])) / str(date.year)
+    folder = sermon_folder(plan, date, test_root)
     folder.mkdir(parents=True, exist_ok=True)
     out = folder / f"{date.isoformat()} - {safe_name(plan['file_title'])}.mp3"
     ffmpeg("-i", sermon_mp4, "-vn", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
@@ -434,7 +500,47 @@ def render_mp3(plan, sermon_mp4, date, test_root=None):
            "-metadata", f"album={CONFIG['church_name']}",
            "-metadata", f"date={date.isoformat()}", out)
     log(f"Radio MP3: {out}")
+    if not test_root:  # every sermon MP3 also collected in one folder: Media\Sermon MP3s
+        mp3s = Path(CONFIG["sermon_mp3_folder"])
+        mp3s.mkdir(parents=True, exist_ok=True)
+        shutil.copy(out, mp3s / out.name)
+        log(f"Copied to {mp3s / out.name}")
     return out
+
+
+SONG_LOG_FIELDS = ["Date", "Order", "Song", "Artist", "Lead", "Length", "Service time", "File"]
+
+
+def read_song_log(logf):
+    import csv
+    if not Path(logf).exists():
+        return []
+    with open(logf, newline="", encoding="utf-8-sig") as fh:
+        return [r for r in csv.DictReader(fh) if r.get("Date")]
+
+
+def write_song_log(logf, rows):
+    import csv
+    with open(logf, "w", newline="", encoding="utf-8-sig") as fh:  # BOM so Excel shows "·" right
+        w = csv.DictWriter(fh, SONG_LOG_FIELDS, extrasaction="ignore")
+        w.writeheader()
+        w.writerows({k: r.get(k) or "" for k in SONG_LOG_FIELDS} for r in rows)
+
+
+def set_song_leads(date_iso, leads):
+    """Fill the Song Log's Lead column for one Sunday. leads = {song file name: lead text};
+    "None" = no soloist; blank = not confirmed yet."""
+    logf = Path(CONFIG["worship_songs_folder"]) / "Song Log.csv"
+    rows = read_song_log(logf)
+    n = 0
+    for r in rows:
+        if r["Date"] == date_iso and r["File"] in leads:
+            r["Lead"] = leads[r["File"]]
+            n += 1
+    write_song_log(logf, rows)
+    log(f"Song Log: set Lead on {n} song(s) for {date_iso}")
+    return n
+
 
 
 def render_songs(plan, src, date, test_root=None):
@@ -458,17 +564,12 @@ def render_songs(plan, src, date, test_root=None):
                      mmss(song["end"] - song["start"]), f"{mmss(song['start'])}-{mmss(song['end'])}", name])
         log(f"Song: {out}")
 
-    import csv
     logf = root / "Song Log.csv"
-    existing = []
-    if logf.exists():
-        with open(logf, newline="", encoding="utf-8-sig") as fh:
-            existing = [r for r in csv.reader(fh)][1:]
-    existing = [r for r in existing if r and r[0] != date.isoformat()]  # re-runs replace that date's rows
-    with open(logf, "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh)
-        w.writerow(["Date", "Order", "Song", "Artist", "Length", "Service time", "File"])
-        w.writerows(existing + [[str(c) for c in r] for r in rows])
+    old = {r["File"]: r.get("Lead", "") for r in read_song_log(logf) if r["Date"] == date.isoformat()}
+    keep = [r for r in read_song_log(logf) if r["Date"] != date.isoformat()]  # re-runs replace that date's rows
+    new = [dict(zip(["Date", "Order", "Song", "Artist", "Length", "Service time", "File"], map(str, r)),
+                Lead=old.get(r[6], "")) for r in rows]
+    write_song_log(logf, keep + new)
     log(f"Updated {logf}")
     return outs
 
@@ -531,7 +632,7 @@ def cmd_render(a):
     src = json.loads((wd / "source.json").read_text())["source"]
     test_root = wd / "TEST OUTPUT" if a.test else None
     if test_root:
-        log(f"TEST MODE — songs and MP3 go to {test_root}, not Dropbox")
+        log(f"TEST MODE — songs and MP3 go to {test_root}, not Google Drive")
     results = {}
     if not a.skip_songs:
         results["songs"] = render_songs(plan, src, date, test_root)
@@ -546,7 +647,19 @@ def cmd_render(a):
     results["sermon_video"] = str(sermon)
     results["sermon_kept_ranges"] = [[round(x, 2), round(y, 2)] for x, y in keeps]
     results["radio_mp3"] = str(render_mp3(plan, sermon, date, test_root))
-    results["resolve_timeline"] = str(write_resolve_timeline(plan, src, keeps, wd, date))
+    timeline = write_resolve_timeline(plan, src, keeps, wd, date)
+    results["resolve_timeline"] = str(timeline)
+    if not test_root:  # finished video -> Sermons, Resolve timeline -> Media\Editing Projects
+        dest = sermon_folder(plan, date)
+        dest.mkdir(parents=True, exist_ok=True)
+        video = dest / f"{date.isoformat()} - {safe_name(plan['file_title'])}.mp4"
+        log(f"Copying sermon video to {video} ...")
+        shutil.copy(sermon, video)
+        results["sermon_video_drive"] = str(video)
+        proj = Path(CONFIG["media_folder"]) / "Editing Projects"
+        proj.mkdir(parents=True, exist_ok=True)
+        shutil.copy(timeline, proj)
+        results["resolve_timeline_drive"] = str(proj / timeline.name)
     save_json(wd / "render_results.json", results)
     log(json.dumps(results, indent=2))
 
@@ -612,8 +725,8 @@ def cmd_slides(a):
         # 128-colour palette: looks identical on a dark text slide, ~1/3 the size (cheap to email)
         img.quantize(colors=128, dither=Image.Dither.NONE).save(out, optimize=True)
         outs.append(str(out))
-    # Also into Dropbox so they're on the phone, ready to post.
-    dest = Path(CONFIG["slides_folder"]) / date.isoformat()
+    # Also into Google Drive (Media\Instagram Slides) so they're on the phone, ready to post.
+    dest = Path(CONFIG["media_folder"]) / "Instagram Slides" / date.isoformat()
     dest.mkdir(parents=True, exist_ok=True)
     for o in outs:
         shutil.copy(o, dest)
@@ -646,6 +759,13 @@ def cmd_upload(a):
     yt = load_plan(date)["youtube"]
     privacy = a.privacy or yt.get("privacy") or CONFIG["youtube_privacy"]
     api = build("youtube", "v3", credentials=youtube_creds(), cache_discovery=False)
+    thumb = wd / "thumbnail.jpg"
+    if a.thumbnail_only:  # (re)set the thumbnail on the video already uploaded
+        res = json.loads((wd / "youtube_result.json").read_text())
+        res["thumbnail"] = set_thumbnail(api, res["video_id"], thumb)
+        save_json(wd / "youtube_result.json", res)
+        log(json.dumps(res, indent=2))
+        return
     body = {"snippet": {"title": yt["title"][:100], "description": yt["description"][:5000],
                         "tags": yt.get("tags", []), "categoryId": "29"},  # Nonprofits & Activism
             "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False}}
@@ -657,8 +777,101 @@ def cmd_upload(a):
         if status:
             log(f"  upload {status.progress() * 100:.0f}%")
     res = {"video_id": resp["id"], "url": f"https://www.youtube.com/watch?v={resp['id']}", "privacy": privacy}
+    res["thumbnail"] = set_thumbnail(api, resp["id"], thumb) if thumb.exists() else "none (run thumbnail first)"
+    res["playlist"] = add_to_series_playlist(api, resp["id"], load_plan(date))
     save_json(wd / "youtube_result.json", res)
     log(json.dumps(res, indent=2))
+
+
+def add_to_series_playlist(api, video_id, plan):
+    """Add the video to the channel's "<Series> | Sermon Series | New Light Church" playlist.
+    Series comes from lower_third_subtitle ("Growth Rings · Week 1"). Returns a status string."""
+    series = plan.get("lower_third_subtitle", "").split("·")[0].strip()
+    if not series:
+        return "skipped (no series in plan)"
+    try:
+        pls, page = [], None
+        while True:
+            r = api.playlists().list(part="snippet", mine=True, maxResults=50, pageToken=page).execute()
+            pls += r["items"]
+            page = r.get("nextPageToken")
+            if not page:
+                break
+        match = [p for p in pls if p["snippet"]["title"].split("|")[0].strip().lower() == series.lower()]
+        if not match:
+            return f"no playlist named '{series}' — add it by hand"
+        pl = match[0]["id"]
+        have, page = set(), None
+        while True:
+            r = api.playlistItems().list(part="snippet", playlistId=pl, maxResults=50, pageToken=page).execute()
+            have |= {i["snippet"]["resourceId"]["videoId"] for i in r["items"]}
+            page = r.get("nextPageToken")
+            if not page:
+                break
+        if video_id in have:
+            return f"already in '{match[0]['snippet']['title']}'"
+        api.playlistItems().insert(part="snippet", body={"snippet": {
+            "playlistId": pl, "resourceId": {"kind": "youtube#video", "videoId": video_id}}}).execute()
+        return f"added to '{match[0]['snippet']['title']}'"
+    except Exception as e:
+        return f"failed: {e}"
+
+
+LIVE_FOOTER = """New Light Church in Bladenboro, NC. Join us in person Sundays at 10am at 307 Chestnut St, Bladenboro, NC 28320, or live online right here every week.
+
+👋 New here? What to expect: https://newlight.network/i-m-new
+📝 Connect card (takes a minute): https://form.church/hBxLqQXe
+🙏 Give: https://newlight.network/give
+🔗 Events & everything else: https://linktr.ee/newlight
+
+Instagram: https://www.instagram.com/new_light_church/
+Facebook: https://www.facebook.com/NewLightChurch.info
+Website: https://newlight.network
+
+🔔 Subscribe so you never miss a Sunday.
+
+#NewLightChurch #BladenboroNC #ChurchOnline"""
+
+LIVE_TAGS = ["Bladen County", "Bladenboro", "Bladenboro NC", "New Light Church", "Sunday service",
+             "church in Bladenboro", "church online", "live church service", "sermon", "worship"]
+
+
+def cmd_live(a):
+    """Rename that Sunday's YouTube livestream (usually "Online Worship Service") to the message
+    title, give it a description, and add it to the series playlist. Optional plan.json
+    "live": {"guest": "Special Guest Worship Leader Russ Lee", "note": "<first line of description>"}."""
+    from googleapiclient.discovery import build
+    date = sunday_of(a.date)
+    plan = load_plan(date)
+    yt, live = plan["youtube"], plan.get("live") or {}
+    api = build("youtube", "v3", credentials=youtube_creds(), cache_discovery=False)
+    found = []
+    for status in ("completed", "active"):
+        r = api.liveBroadcasts().list(part="snippet", broadcastStatus=status, broadcastType="all",
+                                      maxResults=10).execute()
+        for b in r.get("items", []):
+            start = b["snippet"].get("actualStartTime") or ""
+            if start and dt.datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone().date() == date:
+                found.append(b)
+    if not found:
+        die(f"No YouTube livestream found for {date}")
+    vid = found[0]["id"]
+    base = yt["title"]
+    title = f"{base} | {live['guest']}" if live.get("guest") else f"{base} | New Light Church"
+    if len(title) > 100:
+        title = f"{base} | New Light Church"
+    summary = yt["description"].split("\n\n")[0]
+    desc = (f"🎤 {live['note']}\n\n" if live.get("note") else "") + f"{summary}\n\n{LIVE_FOOTER}"
+    series = plan.get("lower_third_subtitle", "").split("·")[0].strip()
+    guest_name = live.get("guest", "").split("Leader")[-1].strip() if live.get("guest") else ""
+    tags = LIVE_TAGS + [t for t in (plan.get("speaker"), series, base.split("|")[0].strip(), guest_name) if t]
+    api.videos().update(part="snippet", body={"id": vid, "snippet": {
+        "title": title[:100], "description": desc[:5000], "tags": tags,
+        "categoryId": "24", "defaultLanguage": "en"}}).execute()
+    res = {"video_id": vid, "url": f"https://www.youtube.com/watch?v={vid}", "title": title,
+           "playlist": add_to_series_playlist(api, vid, plan)}
+    save_json(workdir(date) / "youtube_live_result.json", res)
+    log(json.dumps(res, indent=2, ensure_ascii=False))
 
 
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload",
@@ -715,14 +928,334 @@ def cmd_opus_upload(a):
     log("OpusClip upload complete.")
 
 
+# ---------------------------------------------------------------- google drive
+
+def drive_cloud_id(path):
+    """Look up a G:\\ folder's Google Drive ID in Drive for Desktop's local metadata.
+    Returns None until Drive has finished uploading the folder."""
+    import glob
+    import sqlite3
+    rel = Path(path).resolve().relative_to(Path("G:/Shared drives")).parts  # (drive, sub, ...)
+    for db in glob.glob(os.path.expandvars(r"%LOCALAPPDATA%\Google\DriveFS\*\metadata_sqlite_db")):
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            row = con.execute("SELECT stable_id, id FROM items WHERE local_title=? AND is_folder=1 "
+                              "AND id LIKE '0A%' AND is_tombstone=0", (rel[0],)).fetchone()
+            for part in rel[1:]:
+                if not row:
+                    break
+                row = con.execute(
+                    "SELECT i.stable_id, i.id FROM items i JOIN stable_parents p ON p.item_stable_id=i.stable_id "
+                    "WHERE p.parent_stable_id=? AND i.local_title=? AND i.is_tombstone=0 AND i.trashed=0",
+                    (row[0], part)).fetchone()
+        finally:
+            con.close()
+        if row and not row[1].startswith("local"):
+            return row[1]
+    return None
+
+
+def cmd_drive_link(a):
+    deadline = time.time() + a.wait * 60
+    while True:
+        cid = drive_cloud_id(a.path)
+        if cid:
+            if Path(a.path).is_file():
+                log(f"https://drive.google.com/file/d/{cid}/view")
+            else:
+                log(f"https://drive.google.com/drive/folders/{cid}")
+            return
+        if time.time() > deadline:
+            die(f"Google Drive hasn't synced {a.path} yet (waited {a.wait} min)")
+        time.sleep(20)
+
+
+# ---------------------------------------------------------------- YouTube thumbnail
+
+def cmd_thumb_frames(a):
+    """Contact sheets of candidate frames from the edited sermon, to pick the thumbnail shot.
+    Wide sheets every ~55 s; pass --around <sec> for a 0.5 s close look at one moment."""
+    from PIL import Image, ImageDraw
+    date = sunday_of(a.date)
+    wd = workdir(date)
+    out = wd / "thumbs"
+    out.mkdir(exist_ok=True)
+    if a.raw:
+        return cmd_thumb_frames_raw(a, wd, out)
+    dur = duration(wd / "sermon.mp4")
+    if a.around is not None:
+        times = [round(a.around - 3 + i * 0.5, 1) for i in range(12)]
+        name, cell = f"around_{a.around:g}", (640, 360)
+    else:
+        times = [float(t) for t in range(30, int(dur) - 10, 55)]
+        name, cell = "sheet", (480, 270)
+    W, H = cell
+    cols = 4 if a.around is not None else 6
+    pages = [times[i:i + 24] for i in range(0, len(times), 24)]
+    for n, page in enumerate(pages):
+        sheet = Image.new("RGB", (W * cols, H * ((len(page) + cols - 1) // cols)))
+        for i, t in enumerate(page):
+            f = out / f"f_{t:g}.png"
+            ffmpeg("-ss", t, "-i", wd / "sermon.mp4", "-frames:v", "1", f)
+            im = Image.open(f).convert("RGB").resize(cell)
+            d = ImageDraw.Draw(im)
+            d.rectangle([0, 0, 120, 40], fill="black")
+            d.text((6, 2), f"{t:g}", font=font(30), fill="yellow")
+            sheet.paste(im, ((i % cols) * W, (i // cols) * H))
+        p = out / f"{name}_{n}.jpg"
+        sheet.save(p, quality=85)
+        log(str(p))
+
+
+def thumb_font(size):
+    from PIL import ImageFont
+    for n in ("seguibl.ttf", "ariblk.ttf", "impact.ttf", "arialbd.ttf"):
+        p = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / n
+        if p.exists():
+            return ImageFont.truetype(str(p), size)
+    return font(size)
+
+
+def sermon_to_raw(wd, t):
+    """Second in the edited sermon -> second in the raw recording (via render's kept ranges)."""
+    rr = wd / "render_results.json"
+    if not rr.exists():
+        return None
+    for s, e in json.loads(rr.read_text())["sermon_kept_ranges"]:
+        if t <= e - s:
+            return s + t
+        t -= e - s
+    return None
+
+
+def raw_source(wd):
+    p = wd / "source.json"
+    src = Path(json.loads(p.read_text())["source"]) if p.exists() else None
+    return src if src and src.exists() else None
+
+
+def sharpness(img, box):
+    from PIL import ImageFilter, ImageStat
+    return ImageStat.Stat(img.convert("L").crop(box).filter(ImageFilter.FIND_EDGES)).var[0]
+
+
+def face_box(size, fx, fy):
+    w, h = size
+    return (int(max(0, fx * w - 0.07 * w)), int(max(0, fy * h - 0.13 * h)),
+            int(min(w, fx * w + 0.07 * w)), int(min(h, fy * h + 0.15 * h)))
+
+
+def cmd_thumb_frames_raw(a, wd, out):
+    """Every frame of the RAW recording within ±0.6 s of --around, scored for sharpness on the
+    face, so the thumbnail uses the crispest frame with a good expression."""
+    from PIL import Image, ImageDraw
+    src, rt = raw_source(wd), sermon_to_raw(wd, a.around)
+    if not src or rt is None:
+        die("raw recording (X6 drive) or render_results.json not available — use --around without --raw")
+    fx, fy = (float(v) for v in a.face.split(",")) if a.face else (0.5, 0.35)
+    tmp = out / "raw_tmp"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir()
+    ffmpeg("-ss", round(rt - 0.6, 3), "-i", src, "-t", 1.2, "-fps_mode", "passthrough", tmp / "r_%03d.png")
+    files = sorted(tmp.glob("r_*.png"))
+    step = 1.2 / max(1, len(files))
+    rows = []
+    for i, f in enumerate(files):
+        t = round(a.around - 0.6 + i * step, 2)
+        dest = out / f"r_{t:.2f}.png"
+        shutil.move(str(f), dest)
+        im = Image.open(dest)
+        rows.append((t, sharpness(im, face_box(im.size, fx, fy)), dest))
+    tmp.rmdir()
+    top = {r[0] for r in sorted(rows, key=lambda r: -r[1])[:5]}
+    cw, ch, cols = 300, 360, 8
+    sheet = Image.new("RGB", (cw * cols, ch * ((len(rows) + cols - 1) // cols)), (20, 20, 20))
+    for i, (t, sc, p) in enumerate(rows):
+        im = Image.open(p).convert("RGB")
+        w, h = im.size
+        cx, cy = fx * w, fy * h
+        cell = im.crop((int(cx - 0.09 * w), int(cy - 0.12 * h), int(cx + 0.09 * w), int(cy + 0.26 * h))).resize((cw, ch))
+        d = ImageDraw.Draw(cell)
+        if t in top:
+            d.rectangle([0, 0, cw - 1, ch - 1], outline=(60, 220, 90), width=6)
+        d.rectangle([0, 0, cw, 36], fill="black")
+        d.text((6, 2), f"{t:.2f}  sharp {sc:.0f}", font=font(24), fill="yellow")
+        sheet.paste(cell, ((i % cols) * cw, (i // cols) * ch))
+    p = out / f"raw_{a.around:g}.jpg"
+    sheet.save(p, quality=88)
+    log(str(p))
+    log("Sharpest (green): " + ", ".join(f"{t:.2f}" for t, _, _ in sorted(rows, key=lambda r: -r[1])[:5]))
+
+
+def enhance_frame(im):
+    """Make a video still crisper WITHOUT redrawing anything (no AI face restore): light denoise,
+    2x upscale, two unsharp passes, a touch of contrast."""
+    from PIL import Image, ImageEnhance, ImageFilter
+    im = im.filter(ImageFilter.MedianFilter(3))
+    im = im.resize((im.width * 2, im.height * 2), Image.LANCZOS)
+    im = im.filter(ImageFilter.UnsharpMask(radius=3, percent=110, threshold=2))
+    im = im.filter(ImageFilter.UnsharpMask(radius=1.2, percent=90, threshold=1))
+    im = ImageEnhance.Contrast(im).enhance(1.07)
+    return ImageEnhance.Color(im).enhance(1.04)
+
+
+def series_info(plan, th):
+    name = th.get("series") or plan.get("lower_third_subtitle", "").split(" · ")[0].strip()
+    info = CONFIG.get("series_art", {}).get(name) or {}
+    art = Path(info["path"]) if info.get("path") else None
+    return name, (art if art and art.exists() else None), info
+
+
+def cmd_thumbnail(a):
+    """1280x720 YouTube thumbnail from plan["thumbnail"]: the pastor cut out of a real (sharpened,
+    never retouched) frame, in front of the series artwork, with the series logo and a bold caption."""
+    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+    from rembg import remove, new_session
+    date = sunday_of(a.date)
+    wd = workdir(date)
+    plan = load_plan(date)
+    th = plan["thumbnail"]
+    W, H = 1280, 720
+    frame = wd / "thumb_frame.png"
+    src, rt = raw_source(wd), sermon_to_raw(wd, th["at"])
+    if src and rt is not None and th.get("raw", True):
+        ffmpeg("-ss", round(rt, 3), "-i", src, "-frames:v", "1", frame)  # straight from the camera file
+    else:
+        log("Raw recording not available — using the edited sermon for the frame.")
+        ffmpeg("-ss", th["at"], "-i", wd / "sermon.mp4", "-frames:v", "1", frame)
+    img_src = enhance_frame(Image.open(frame).convert("RGB"))
+    sw, sh = img_src.size
+    fx, fy = th["pastor_x"] * sw, th.get("pastor_y", 0.36) * sh
+
+    # Cut the pastor out, waist-up (default box) and fade him out before the pulpit.
+    l, t, r, b = th.get("body_box") or [th["pastor_x"] - 0.16, th.get("pastor_y", 0.36) - 0.16,
+                                       th["pastor_x"] + 0.19, th.get("pastor_y", 0.36) + 0.41]
+    box = (int(max(0, l * sw)), int(max(0, t * sh)), int(min(sw, r * sw)), int(min(sh, b * sh)))
+    cut = remove(img_src.crop(box), session=new_session("u2net_human_seg"))
+    fs = int(255 * float(th.get("fade_from", 0.72)))
+    fade = Image.linear_gradient("L").resize(cut.size).point(
+        lambda v: 255 if v < fs else int(255 * (255 - v) / max(1, 255 - fs)))
+    cut.putalpha(Image.composite(cut.split()[3], Image.new("L", cut.size, 0), fade))
+
+    name, art_path, info = series_info(plan, th)
+    accent = tuple(info.get("accent") or CONFIG["brand_accent_rgb"])
+    side = th.get("pastor_side", "left")
+    # Background: the series art (crisp, dimmed) — or, with no art on file, his own stage blurred.
+    if art_path:
+        art = Image.open(art_path).convert("RGB")
+        sc = max(W / art.width, H / art.height)
+        bg = art.resize((int(art.width * sc) + 1, int(art.height * sc) + 1), Image.LANCZOS)
+        bg = bg.crop(((bg.width - W) // 2, (bg.height - H) // 2, (bg.width - W) // 2 + W, (bg.height - H) // 2 + H))
+        bg = ImageEnhance.Brightness(bg.filter(ImageFilter.GaussianBlur(1.5))).enhance(0.68)
+    else:
+        bg = ImageEnhance.Brightness(img_src.resize((W, H)).filter(ImageFilter.GaussianBlur(12))).enhance(0.35)
+        log(f"No series art in config for '{name}' — using a blurred stage background.")
+    img = bg.convert("RGBA")
+    # Darken the caption side so the words read.
+    wash = Image.new("L", (W, 1))
+    for x in range(W):
+        u = x / W if side == "left" else 1 - x / W
+        wash.putpixel((x, 0), int(185 * min(1, max(0, (u - 0.40) / 0.22))))
+    img = Image.composite(Image.new("RGBA", (W, H), (12, 6, 2, 255)), img, wash.resize((W, H)))
+
+    # Place him: height ~106% of the frame, face at pastor_at across; warm rim glow behind.
+    s = H * 1.06 / cut.height
+    c = cut.resize((int(cut.width * s), int(cut.height * s)), Image.LANCZOS)
+    face_in_c = (fx - box[0]) * s
+    at = float(th.get("pastor_at", 0.2))
+    px = int((at * W if side == "left" else (1 - at) * W) - face_in_c)
+    pos = (px, H - c.height + 24)
+    a_ = c.split()[3].filter(ImageFilter.MaxFilter(9)).filter(ImageFilter.GaussianBlur(16))
+    glow = Image.new("RGBA", c.size, (255, 175, 90, 0))
+    glow.putalpha(a_.point(lambda v: min(255, int(v * 1.3))))
+    img.alpha_composite(glow, pos)
+    img.alpha_composite(c, pos)
+
+    d = ImageDraw.Draw(img)
+    if art_path:  # series logo badge (from the art), accent border
+        cl, ct, cr, cb = info.get("badge_crop", [0, 0, 1, 1])
+        aw, ah = art.size
+        logo = art.crop((int(cl * aw), int(ct * ah), int(cr * aw), int(cb * ah)))
+        lw = 340
+        logo = logo.resize((lw, int(lw * logo.height / logo.width)), Image.LANCZOS)
+        bx = W - lw - 45 if side == "left" else 45
+        by = 34
+        d.rounded_rectangle([bx - 4, by - 4, bx + lw + 4, by + logo.height + 4], 22, fill=accent)
+        lm = Image.new("L", logo.size, 0)
+        ImageDraw.Draw(lm).rounded_rectangle([0, 0, *logo.size], 20, fill=255)
+        img.paste(logo, (bx, by), lm)
+        cap_top = by + logo.height + 30
+    else:  # text badge
+        tag = plan.get("lower_third_subtitle", name).upper()
+        tf = font(30)
+        tw = d.textlength(tag, font=tf)
+        bx = W - 45 - tw - 36 if side == "left" else 45
+        d.rounded_rectangle([bx, 40, bx + tw + 36, 90], 10, fill=(20, 12, 6), outline=accent, width=3)
+        d.text((bx + 18, 46), tag, font=tf, fill=(255, 230, 200))
+        cap_top = 130
+    box_l, box_r = (int(W * 0.47), W - 45) if side == "left" else (45, int(W * 0.53))
+    box_t, box_b = cap_top, H - 40
+
+    # Caption: biggest size where every line fits; highlight lines 1.45x in the accent color.
+    lines = [(x, False) for x in th["caption"]] + [(x, True) for x in th.get("highlight", [])]
+    size = 200
+    while size > 40:
+        fonts = [thumb_font(int(size * (1.45 if hi else 1))) for _, hi in lines]
+        widths = [d.textlength(x, font=f) for (x, _), f in zip(lines, fonts)]
+        heights = [f.getbbox(x)[3] - f.getbbox(x)[1] for (x, _), f in zip(lines, fonts)]
+        total = sum(heights) + 14 * (len(lines) - 1)
+        if max(widths) <= box_r - box_l and total <= box_b - box_t:
+            break
+        size -= 4
+    y = box_t + (box_b - box_t - total) // 2
+    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    pos_ = []
+    for (x_, hi), f, w, h in zip(lines, fonts, widths, heights):
+        x = box_r - w if side == "left" else box_l
+        top = y - f.getbbox(x_)[1]
+        pos_.append((x, top, x_, hi, f))
+        sd.text((x + 6, top + 9), x_, font=f, fill=(0, 0, 0, 230))
+        y += h + 14
+    img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(9)))
+    d = ImageDraw.Draw(img)
+    for x, top, x_, hi, f in pos_:
+        d.text((x, top), x_, font=f, fill=accent if hi else (255, 255, 255),
+               stroke_width=max(3, size // 26), stroke_fill=(0, 0, 0))
+
+    out = wd / "thumbnail.jpg"
+    img.convert("RGB").save(out, quality=93)
+    log(str(out))
+    if not a.test:
+        dest = sermon_folder(plan, date)
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copy(out, dest / f"{date.isoformat()} - {safe_name(plan['file_title'])} - thumbnail.jpg")
+
+
+def set_thumbnail(api, video_id, path):
+    from googleapiclient.http import MediaFileUpload
+    try:
+        api.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(str(path), mimetype="image/jpeg")).execute()
+        return "set"
+    except Exception as e:  # e.g. channel not verified for custom thumbnails
+        log(f"Could not set thumbnail: {e}")
+        return f"failed: {e}"
+
+
 # ---------------------------------------------------------------- main
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("find", "notes", "transcribe", "audiomap", "render", "slides", "upload",
-                 "youtube-login", "opus-upload"):
+                 "youtube-login", "opus-upload", "pending", "drive-link",
+                 "thumbnail", "thumb-frames", "live"):
         p = sub.add_parser(name)
+        if name == "pending":
+            p.add_argument("--claim", action="store_true", help="mark the recording as being worked on")
+        if name == "drive-link":
+            p.add_argument("--path", required=True, help=r"folder or file under G:\Shared drives")
+            p.add_argument("--wait", type=int, default=10, help="minutes to wait for Drive to sync it")
         if name == "opus-upload":
             p.add_argument("--url", required=True, help="upload_url from opusclip_create_upload_link")
         p.add_argument("--date", help="the Sunday, YYYY-MM-DD (default: most recent Sunday)")
@@ -734,6 +1267,15 @@ def main():
             p.add_argument("--timeline-only", action="store_true", help="only write the Resolve timeline")
         if name == "upload":
             p.add_argument("--privacy", choices=["private", "unlisted", "public"])
+            p.add_argument("--thumbnail-only", action="store_true",
+                           help="just set thumbnail.jpg on the already-uploaded video")
+        if name == "thumbnail":
+            p.add_argument("--test", action="store_true", help="don't copy it to Google Drive")
+        if name == "thumb-frames":
+            p.add_argument("--around", type=float, help="close look (0.5 s steps) around this second")
+            p.add_argument("--raw", action="store_true",
+                           help="with --around: every raw-camera frame within ±0.6 s, scored for sharpness")
+            p.add_argument("--face", help="with --raw: face position as x,y fractions of the frame, e.g. 0.11,0.36")
     a = ap.parse_args()
     globals()[f"cmd_{a.cmd.replace('-', '_')}"](a)
 

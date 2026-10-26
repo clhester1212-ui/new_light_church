@@ -1,6 +1,6 @@
 ---
 name: new-light-practice
-description: Organizes New Light Church worship-team PRACTICE recordings. When a Crucial X6 drive is plugged in, finds each unprocessed "Practice…" recording, identifies every song the band worked on (through all the stops, restarts and talking), and saves a low-quality 480p clip of each song, labeled, into Google Drive "Worship\Practice Worship Files\<date>\" plus a Practice Log. Use when asked to run, test, or debug the practice routine, or when its scheduled task invokes it.
+description: Organizes New Light Church worship-team PRACTICE recordings. When a Crucial X6 drive is plugged in, finds each unprocessed practice recording (named "Practice…", or anything recorded Wednesday 6–8 pm), identifies every song the band worked on (through all the stops, restarts and talking), and saves a low-quality 480p clip of each song, labeled, into Google Drive "Worship\Practice Worship Files\<date>\" plus a Practice Log. Use when asked to run, test, or debug the practice routine, or when its scheduled task invokes it.
 ---
 
 # New Light — practice recordings organizer
@@ -16,6 +16,10 @@ All mechanical work: `cmd /c "C:\Users\NewLight\new_light_church\pipeline\practi
 `practice.cmd pending --claim`
 - Prints `NONE` → **stop immediately. No email, nothing else.** (Drive not plugged in, or
   everything is already done.)
+- A recording counts as practice if its name starts with "Practice" **or** it was recorded
+  on a Wednesday between 6 and 8 pm (the band's practice slot) — whatever the ATEM named it
+  (e.g. "Worship…"). The Wednesday rule covers recordings from `practice_wednesday_since`
+  (config.json; default 2026-10-08) onward.
 - Otherwise prints `{"key", "date", "source", "gb"}` — process that one recording. One per
   run; the next poll picks up the next. `date` is when it was actually recorded (the ATEM
   re-uses old file names, so never trust the date in the name).
@@ -74,8 +78,15 @@ One email to clhester1212@gmail.com — subject "Practice <date>: <n> songs orga
 the song table (n, song, artist, length, takes, notes), the source recording name, anything
 uncertain, and the Google Drive link to the folder
 (`cmd /c "pipeline\nlc.cmd drive-link --path \"G:\Shared drives\Worship\Practice Worship Files\<date>\""`;
-if that times out, give the G:\ path). Then write `work\practice\<key>\done.json` and delete
-`running.json`.
+if that times out, give the G:\ path).
+
+**Slack copy**: send the same report to Cory Hester in Slack via the Francis bot — write it as
+Slack mrkdwn (`*bold*`, `• ` bullets, `<url|text>` links, no tables) to
+`work\practice\<key>\slack_report.md`, then run
+`cmd /c "C:\Users\NewLight\new_light_church\pipeline\slack_dm.cmd --file work\practice\<key>\slack_report.md"`.
+If it errors, note that in the email and move on.
+
+Then write `work\practice\<key>\done.json` and delete `running.json`.
 
 If anything fails, still email what failed and what got done, and write `done.json` with
 `"status": "failed"` so the poll doesn't loop on it.
