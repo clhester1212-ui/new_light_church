@@ -6,13 +6,19 @@ in secrets/slack.json "allowed_user_ids" are listened to; anyone else just gets
 told their Slack user ID.
 
 Run:  slackbot\\francis.cmd   (also starts automatically at login)
+
+Started that way, this script is a small watchdog: it runs the real bot as a child
+process ("--bot"), sends anything the bot prints (including crash tracebacks) to
+work/francis.log, and starts it again a minute after it stops.
 """
 import glob
 import json
+import msvcrt
 import os
 import queue
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -25,6 +31,8 @@ SECRETS = os.path.join(ROOT, "secrets", "slack.json")
 WORK = os.path.join(ROOT, "work")
 SESSIONS = os.path.join(WORK, "slack_sessions.json")
 LOG = os.path.join(WORK, "francis.log")
+LOCK = os.path.join(WORK, "francis.lock")
+RESTART_DELAY = 60  # seconds to wait before restarting a bot that stopped
 
 SYSTEM_PROMPT = """You are Francis, New Light Church's media assistant, running on the church computer.
 The message comes from Slack on the user's phone. Nobody is at the computer, so nobody can
@@ -167,5 +175,31 @@ def main():
     SocketModeHandler(app, cfg["app_token"]).start()
 
 
+def watchdog():
+    """Keep one copy of the bot running; restart it whenever it exits."""
+    os.makedirs(WORK, exist_ok=True)
+    lock = open(LOCK, "w")
+    try:
+        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        return  # another watchdog already has Francis running; two would answer twice
+    while True:
+        log("watchdog: starting bot")
+        with open(LOG, "a", encoding="utf-8") as out:
+            proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--bot"],
+                                    cwd=ROOT, stdout=out, stderr=subprocess.STDOUT,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            code = proc.wait()
+        log(f"watchdog: bot stopped (exit {code}); restarting in {RESTART_DELAY}s")
+        time.sleep(RESTART_DELAY)
+
+
 if __name__ == "__main__":
-    main()
+    if "--bot" in sys.argv:
+        try:
+            main()
+        except BaseException:
+            log("bot crashed:\n" + traceback.format_exc())
+            raise
+    else:
+        watchdog()

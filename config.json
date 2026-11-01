@@ -11,6 +11,7 @@
   "recording_folders": [],
   "process_recordings_since": "2026-10-11",
   "min_recording_gb": 0.5,
+  "atem_hosts": {"ATEM Mini Extreme": "192.168.11.111"},
   "sermon_notes_folder": "C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Sermons",
 
   "worship_songs_folder": "G:\\Shared drives\\Worship",
@@ -29,6 +30,8 @@
 
   "series_art": {
     "Growth Rings": {"path": "C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Props\\Carved Growth Rings Log Poster.png",
-                     "badge_crop": [0.138, 0.138, 0.879, 0.882], "accent": [255, 140, 40]}
+                     "badge_crop": [0.138, 0.138, 0.879, 0.882], "accent": [255, 140, 40]},
+    "Enough": {"path": "C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Props\\Enough Series Nov 2026.jpg",
+               "badge_crop": [0.15, 0.17, 0.84, 0.68], "accent": [232, 190, 80]}
   }
 }

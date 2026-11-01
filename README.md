@@ -45,7 +45,8 @@ the Google Drive shared drives, synced on the laptop as `G:\Shared drives\`.
 |---|---|
 | `.claude/skills/new-light-sunday/SKILL.md` | The procedure Claude follows (judgment calls) |
 | `pipeline/nlc.py` (`nlc.cmd` launcher) | The mechanical steps: pending, find, notes, transcribe, render, slides, upload, drive-link |
-| `config.json` | Folders, default speaker, quality, YouTube privacy |
+| `pipeline/atem_name.js` (`atem_name.cmd` launcher) | Sets the ATEM recording name: `Practice_<m_d_yyyy>` Wednesdays (Task Scheduler, noon), `Worship_<m_d_yyyy>` Sundays (6 am). `--read` shows current names; log in `work/atem_name.log` |
+| `config.json` | Folders, default speaker, quality, YouTube privacy, ATEM Mini Extreme IP |
 | `secrets/youtube.json` | YouTube OAuth credentials — gitignored |
 | `slackbot/francis.py` (`francis.cmd` launcher) | Slack bot that relays your messages to Claude here |
 | `secrets/slack.json` | Slack tokens + your Slack user ID for Francis — gitignored |
