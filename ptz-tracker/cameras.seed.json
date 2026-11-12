@@ -1,0 +1,50 @@
+{
+  "_about": "Starting camera list for the PTZ tracker database. Read once when data/ptz.sqlite is first created. Checked 2026-11-11 against the cameras and Companion.",
+  "cameras": [
+    {
+      "id": "left",
+      "name": "Left",
+      "ip": "192.168.11.177",
+      "model": "Sony SRG-300SE",
+      "serial": "3306440",
+      "rtsp_url": "rtsp://192.168.11.177/media/video1",
+      "role": "track",
+      "companion": "Visca03Left",
+      "notes": "Companion page C3. Will auto-track.",
+      "presets": {"0": "S-1", "1": "S-2", "2": "S-3", "3": "S-4", "4": "S-5", "5": "Rob", "6": "Zoom out", "7": "Zoom in", "8": "Crowd", "13": "Preach"}
+    },
+    {
+      "id": "right",
+      "name": "Right",
+      "ip": "192.168.11.178",
+      "model": "Sony SRG-300SE",
+      "serial": "3306570",
+      "rtsp_url": "rtsp://192.168.11.178/media/video1",
+      "role": "track",
+      "companion": "Visca04Right",
+      "notes": "Companion page C4. Will auto-track.",
+      "presets": {"0": "S-1", "1": "S-2", "2": "S-3", "3": "S-4", "4": "S-5", "5": "Rob", "6": "Zoom out", "7": "Zoom in", "8": "Crowd", "13": "Preach"}
+    },
+    {
+      "id": "stage",
+      "name": "Stage (back)",
+      "ip": "192.168.11.176",
+      "model": "Sony SRG-X120",
+      "serial": null,
+      "rtsp_url": "rtsp://192.168.11.176/media/video1",
+      "role": "presets",
+      "companion": "Visca05Stage",
+      "notes": "Companion page C5. Presets only. Some preset numbers have two different labels on different Companion pages.",
+      "presets": {"0": "Piano", "1": "Drums / R Guitar", "2": "Karen / L Guitar", "3": "Crowd / Drums 1", "4": "Drums 2", "5": "Drums 1&2", "6": "Stage Right", "7": "Crowd", "8": "Crowd"}
+    },
+    {
+      "id": "left2",
+      "name": "Left2 (old entry)",
+      "ip": "192.168.11.77",
+      "model": "unknown",
+      "role": "retired",
+      "companion": "Visca03Left2",
+      "notes": "In Companion but does not answer ping or VISCA (2026-11-11). Probably a leftover."
+    }
+  ]
+}
