@@ -5,6 +5,7 @@ You need: one person who can walk around on stage for about 20 minutes, the stag
 ## 0. Before you start (2 min)
 - Lights on. Make sure nothing is going out live.
 - Dashboard: press **Unlock moves (10 min)**. Press it again whenever it runs out.
+- If **Stay on stage** says "No edges set yet", set them first on Left and Right: aim at each edge of the stage with the nudge buttons and press that edge's button.
 
 ## 1. Measure the video delay (1 min, Left camera)
 - Press **Measure video delay** on the Left card. The camera makes one small pan and goes back to where it was.

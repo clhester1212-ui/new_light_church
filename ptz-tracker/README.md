@@ -35,6 +35,14 @@ On the Left and Right cards:
 | **Hold zoom** | Keeps following but stops changing the zoom | Yes |
 | **Go + track** | Goes to the chosen preset, waits about 4 seconds, then follows whoever is center there | Yes |
 
+### Stay on stage (stage edges)
+
+Each tracking camera can be given four edges: left, right, bottom and top. While tracking, it never pans or tilts past them, so it won't follow someone off the stage, into the seats or down the aisle. It can always move back toward the stage. The edges are in the camera database, so they're kept after a restart.
+
+To set them: unlock moves, aim the camera at the left edge of the stage with the nudge buttons, and press **◀ Left edge here**. Do the same for the right edge, the bottom edge (the lowest the camera should ever point, usually the stage floor at the front) and the top edge. **Clear edges** removes all four. Setting an edge never moves the camera. Until edges are set, the card says "No edges set yet", and tracking can follow anyone, anywhere.
+
+When it stops at an edge, the status line says "stopped at stage edge (left)", for example. Zoom still works. If the person keeps going, they leave the shot and the camera holds still.
+
 **STOP** on the card, or any manual move (nudge, zoom, preset), immediately ends steering, and the tracker goes back to watch-only.
 
 How it behaves:
@@ -122,6 +130,8 @@ All are `POST`, except the reads. Camera ids: `left`, `right`, `stage`.
 | `GET /api/track/<id>/view.jpg` | Tracker's view with boxes |
 | `POST /api/track/<id>/record?on=1\|0` | Start or stop the test video |
 | `POST /api/track/<id>/measure-delay` | Measure video delay (moves the camera a little, then back) |
+| `POST /api/cameras/<id>/edge?set=left\|right\|low\|high` | Stage edge at where the camera points now (doesn't move it) |
+| `POST /api/cameras/<id>/edge?clear=1` | Clear that camera's stage edges |
 | `GET /api/tuning` / `POST /api/tuning?key=value` / `POST /api/tuning/reset` | Read, change or reset settings |
 | `POST /api/deck?on=1\|0` | Stream Deck control on or off |
 

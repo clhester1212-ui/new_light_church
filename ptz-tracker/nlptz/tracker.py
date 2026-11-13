@@ -155,6 +155,11 @@ class Tracker:
         self.head_hist: deque = deque()      # (time, top of target box)
         self.cmd_hist: deque = deque([(0.0, 0.0, 0.0)])  # (time, pan deg/s, tilt deg/s) we told the camera
         self.dropped = 0             # detections ignored as shadows (for the dashboard)
+        # "Stay on stage": camera pan/tilt numbers it must not steer past (None = no limit)
+        self.edges: dict = {"left": None, "right": None, "low": None, "high": None}
+        self.pt_pos: tuple[int, int] | None = None
+        self.pt_checked = 0.0
+        self.at_edge = ""
         self._candidates: list = []
         self._relock = False
         self._lock = threading.Lock()
@@ -201,11 +206,13 @@ class Tracker:
         if self.log:
             self.log.event("relock")
 
-    def set_framing(self, name: str | None, zoom_speed: int = 1) -> None:
+    def set_framing(self, name: str | None, zoom_speed: int = 1, out_only: bool = False) -> None:
         self.framing = name if name in FRAMING_LABELS else None
         self.zoom_speed = max(0, min(7, zoom_speed))
+        # Slow pull-out only ever widens the shot, never zooms in.
+        self.zoom_out_only = out_only
         if self.log:
-            self.log.event(f"framing {self.framing} speed {self.zoom_speed}")
+            self.log.event(f"framing {self.framing} speed {self.zoom_speed}{' out-only' if out_only else ''}")
 
     def pause(self, seconds: float) -> None:
         """Hold still for a moment (e.g. while a preset move finishes), then carry on."""
@@ -254,6 +261,13 @@ class Tracker:
             if z is not None:
                 self.zoom_pos = z
             self.zoom_checked = now
+        has_edges = any(v is not None for v in self.edges.values())
+        if (self.mode == "steer" and has_edges and hasattr(self.cam, "pan_tilt_position")
+                and now - self.pt_checked > (0.25 if self.sent_pt != (0, 0) else 1.0)):
+            pt = self.cam.pan_tilt_position()
+            if pt is not None:
+                self.pt_pos = pt
+            self.pt_checked = now
         with self._lock:
             self.frame = frame
             self.people = people
@@ -365,9 +379,16 @@ class Tracker:
 
     def _measure_body(self, box) -> None:
         """If the whole body is in the picture, remember how tall the person is in degrees."""
-        if self.zoom_pos is None or self.zoom_dir:
+        # While zooming fast the zoom reading is too stale to trust. A slow zoom (speed 0-2, e.g.
+        # "zoom out to measure" during a pull-out) is close enough, and must be allowed or a
+        # pull-out that's waiting to measure would never stop.
+        if self.zoom_pos is None or (self.zoom_dir and self.zoom_speed > 2):
             return
-        if box[1] > 0.02 and box[3] < 0.97:
+        # Only a standing person counts: someone sitting, or with legs hidden behind a table or
+        # pulpit, makes a squat box and would be taken as a short person (wrong zoom).
+        w, h = box[2] - box[0], box[3] - box[1]
+        standing = w > 0 and (h / w) * (9 / 16) >= 1.9
+        if box[1] > 0.02 and box[3] < 0.97 and standing:
             deg = (box[3] - box[1]) * VFOV_WIDE / magnification(self.zoom_pos)
             self.body_deg = deg if self.body_deg is None else 0.8 * self.body_deg + 0.2 * deg
 
@@ -384,6 +405,7 @@ class Tracker:
         elif self.status == "following" and now >= self.paused_until:
             pan = _ramp(pan, self.planned_pt[0], step)
             tilt = _ramp(tilt, self.planned_pt[1], step)
+        pan, tilt = self._keep_on_stage(pan, tilt)
         self.planned_pt = (pan, tilt)
         self.would_pan, self.would_tilt = pan, tilt
         bits = []
@@ -393,9 +415,31 @@ class Tracker:
             bits.append(f"tilt {'up' if tilt > 0 else 'down'} {abs(tilt)}")
         if self._ztxt:
             bits.append(self._ztxt)
+        if self.at_edge:
+            bits.append(f"stopped at stage edge ({self.at_edge})")
         if self.status == "following" and now >= self.paused_until:
             self.would = ", ".join(bits) or "hold still (person centered)"
         return pan, tilt, zdir
+
+    def _keep_on_stage(self, pan: int, tilt: int) -> tuple[int, int]:
+        """Never steer further out past a stage edge. Moving back toward the stage is fine.
+        Pan numbers grow to the right; tilt numbers grow upward."""
+        self.at_edge = ""
+        if self.pt_pos is None:
+            return pan, tilt
+        p, t = self.pt_pos
+        e = self.edges
+        hit = []
+        if pan < 0 and e["left"] is not None and p <= e["left"]:
+            pan, _ = 0, hit.append("left")
+        if pan > 0 and e["right"] is not None and p >= e["right"]:
+            pan, _ = 0, hit.append("right")
+        if tilt < 0 and e["low"] is not None and t <= e["low"]:
+            tilt, _ = 0, hit.append("bottom")
+        if tilt > 0 and e["high"] is not None and t >= e["high"]:
+            tilt, _ = 0, hit.append("top")
+        self.at_edge = ", ".join(hit)
+        return pan, tilt
 
     def _plan_raw(self, now: float) -> tuple[int, int, int]:
         self._ztxt = ""
@@ -456,6 +500,8 @@ class Tracker:
                 want_vfov = self.body_deg / TUNE[f"{self.framing}_size"]
                 z_target = min(self.cam_zoom_max(), zoom_for_magnification(VFOV_WIDE / want_vfov))
                 diff = z_target - self.zoom_pos
+                if getattr(self, "zoom_out_only", False) and diff > 0:
+                    diff = 0  # pull-out: already at least this wide, so stay
                 if abs(diff) > (ZOOM_TOLERANCE if not self.zoom_dir else ZOOM_TOLERANCE / 2):
                     zdir = 1 if diff > 0 else -1
                     self._ztxt = f"zoom {'in' if zdir > 0 else 'out'} to {label}"
@@ -507,6 +553,7 @@ class Tracker:
                 "would": self.would, "would_pan": self.would_pan, "would_tilt": self.would_tilt,
                 "framing": self.framing, "zoom": self.zoom_pos,
                 "body_measured": self.body_deg is not None, "shadows_ignored": self.dropped,
+                "edges": self.edges, "at_edge": self.at_edge, "pan_tilt": self.pt_pos,
                 "recording": bool(self.log and self.log.video_on),
                 "fps": round(self.fps, 1), "detect_ms": round(self.detect_ms, 1),
             }
@@ -557,5 +604,8 @@ class TrackerManager:
 
     def get(self, cam_id: str, rtsp_url: str, ip: str) -> Tracker:
         if cam_id not in self.trackers:
-            self.trackers[cam_id] = Tracker(cam_id, rtsp_url, ip)
+            t = Tracker(cam_id, rtsp_url, ip)
+            from . import db
+            t.edges = db.stage_edges(cam_id)
+            self.trackers[cam_id] = t
         return self.trackers[cam_id]

@@ -111,6 +111,14 @@ function build(cams) {
           <select id="tp-${c.id}">${c.presets.map(p => `<option value="${p.number}">${p.name}</option>`).join('')}</select>
           <button data-trkpreset="${c.id}" data-mv-trk>Go + track</button>
         </div>
+        <div class="row"><span class="label">Stay on stage: aim the camera at each edge of the stage (with the nudge buttons), then press that edge. Tracking won't steer past them.</span>
+          <button data-edge="/api/cameras/${c.id}/edge?set=left">◀ Left edge here</button>
+          <button data-edge="/api/cameras/${c.id}/edge?set=right">Right edge here ▶</button>
+          <button data-edge="/api/cameras/${c.id}/edge?set=low">▼ Bottom edge here</button>
+          <button data-edge="/api/cameras/${c.id}/edge?set=high">▲ Top edge here</button>
+          <button data-edge="/api/cameras/${c.id}/edge?clear=1">Clear edges</button>
+          <span class="sub" id="edges-${c.id}"></span>
+        </div>
         <div class="row"><span class="label">Testing</span>
           <button data-rec="${c.id}">Record test video</button>
           <button data-trk="/api/track/${c.id}/measure-delay" data-mv-trk data-slow="Measuring video delay (about 10 seconds)…">Measure video delay</button>
@@ -158,6 +166,12 @@ function build(cams) {
     if (!r.ok) toast(j.error || 'Something went wrong');
     else if (j.delay !== undefined) { toast(`Video delay: ${j.delay} s (setting updated)`); loadTuning(); }
     b.disabled = false; refresh(); refreshTrack(); });
+  document.querySelectorAll('[data-edge]').forEach(b => b.onclick = async () => {
+    if (b.dataset.edge.includes('clear=1') && !confirm('Clear all stage edges for this camera?')) return;
+    const r = await fetch(b.dataset.edge, { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    toast(r.ok ? j.detail : (j.error || 'Something went wrong'));
+    refresh(); });
   document.querySelectorAll('[data-rec]').forEach(b => b.onclick = () => {
     const id = b.dataset.rec, on = !(tracking[id] && tracking[id].recording);
     post(`/api/track/${id}/record?on=${on ? 1 : 0}`).then(refreshTrack); });
@@ -208,6 +222,11 @@ async function refresh() {
     dot.className = 'dot ' + (s ? (s.online ? 'on' : 'off') : '');
     st.textContent = !s ? 'Checking…' : !s.online ? 'Not answering' :
       `Power ${s.power} · Pan ${s.pan ?? '?'} · Tilt ${s.tilt ?? '?'} · Zoom ${s.zoom ?? '?'}`;
+    const ed = $('#edges-' + c.id), e = c.edges || {};
+    if (ed) {
+      const set = [['left', 'left'], ['right', 'right'], ['low', 'bottom'], ['high', 'top']].filter(([k]) => e[k] != null);
+      ed.textContent = set.length ? 'Edges set: ' + set.map(([k, n]) => `${n} ${e[k]}`).join(' · ') : 'No edges set yet: tracking can follow anyone, anywhere.';
+    }
   }
   const ev = await (await fetch('/api/events')).json();
   $('#events').innerHTML = ev.map(e => `<li>${new Date(e.ts * 1000).toLocaleString()} — ${e.camera_id ? e.camera_id + ': ' : ''}${e.action}${e.detail ? ' (' + e.detail + ')' : ''}</li>`).join('') || '<li>Nothing yet</li>';

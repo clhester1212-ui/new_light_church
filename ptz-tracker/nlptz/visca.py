@@ -208,6 +208,12 @@ class ViscaCamera:
                     self.reset_sequence()
         return None
 
+    def pan_tilt_position(self) -> tuple[int, int] | None:
+        r = self._inq("81090612FF", wait=0.4)
+        if r and len(r) >= 11:
+            return _signed16(_nibbles(r, 2)), _signed16(_nibbles(r, 6))
+        return None
+
     def status(self) -> dict:
         """Power, zoom and pan/tilt position. Missing values mean no reply."""
         out: dict = {"online": False}

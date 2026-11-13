@@ -114,6 +114,7 @@ class Handler(BaseHTTPRequestHandler):
             cams = db.cameras(include_retired=True)
             for c in cams:
                 c["live"] = State.live.get(c["id"])
+                c["edges"] = db.stage_edges(c["id"])
             return self._json({"cameras": cams, "moves_unlocked": State.moves_unlocked(), "deck_enabled": State.deck_enabled,
                                "unlocked_seconds_left": max(0, int(State.moves_unlocked_until - time.time())),
                                "reply_port_ok": transport().listening})
@@ -203,7 +204,7 @@ class Handler(BaseHTTPRequestHandler):
                         t.start("steer")
                     detail = f"{size}, zoom speed {t.zoom_speed}"
                 elif act == "pullout":
-                    t.set_framing("wide", 0)  # slowest zoom speed
+                    t.set_framing("wide", 0, out_only=True)  # slowest zoom speed, never zooms in
                     if t.mode == "off":
                         t.start("steer")
                     detail = "slow pull-out to wide"
@@ -253,6 +254,29 @@ class Handler(BaseHTTPRequestHandler):
             cam.stop()
             db.log_event(cam_row["id"], "stop")
             return self._json({"ok": True})
+
+        # Stage edges ("stay on stage"). Setting one reads where the camera points now; it
+        # doesn't move anything, so it needs no unlock.
+        #   POST /api/cameras/<id>/edge?set=left|right|low|high   or   ?clear=1
+        if action == "edge":
+            if q.get("clear") == "1":
+                edges = db.clear_stage_edges(cam_row["id"])
+                detail = "stage edges cleared"
+            else:
+                which = q.get("set", "")
+                if which not in db.EDGES:
+                    return self._json({"error": "set must be left/right/low/high"}, 400)
+                pt = cam.pan_tilt_position()
+                if pt is None:
+                    return self._json({"error": "The camera didn't answer. Try again."}, 503)
+                value = pt[0] if which in ("left", "right") else pt[1]
+                edges = db.set_stage_edge(cam_row["id"], which, value)
+                detail = f"{which} stage edge set at {value}"
+            t = TRACKERS.trackers.get(cam_row["id"])
+            if t:
+                t.edges = edges
+            db.log_event(cam_row["id"], "stage edge", detail)
+            return self._json({"ok": True, "edges": edges, "detail": detail})
 
         if not State.may_move(q):
             return self._json({"error": "Camera moves are locked. Unlock them on the dashboard first."}, 423)

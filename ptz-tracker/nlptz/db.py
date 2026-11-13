@@ -36,6 +36,13 @@ CREATE TABLE IF NOT EXISTS status_log (
     online      INTEGER NOT NULL,
     power       TEXT, pan INTEGER, tilt INTEGER, zoom INTEGER
 );
+CREATE TABLE IF NOT EXISTS stage_edges (     -- "stay on stage": tracking never steers past these
+    camera_id   TEXT PRIMARY KEY REFERENCES cameras(id),
+    pan_left    INTEGER,               -- camera pan/tilt numbers, as the dashboard shows them
+    pan_right   INTEGER,
+    tilt_low    INTEGER,
+    tilt_high   INTEGER
+);
 CREATE TABLE IF NOT EXISTS events (
     ts          REAL NOT NULL,
     camera_id   TEXT,
@@ -103,6 +110,32 @@ def camera(cam_id: str) -> dict | None:
         if c["id"] == cam_id:
             return c
     return None
+
+
+EDGES = {"left": "pan_left", "right": "pan_right", "low": "tilt_low", "high": "tilt_high"}
+
+
+def stage_edges(cam_id: str) -> dict:
+    """{'left': pan, 'right': pan, 'low': tilt, 'high': tilt}; missing edges are None."""
+    with _lock:
+        r = con().execute("SELECT * FROM stage_edges WHERE camera_id=?", (cam_id,)).fetchone()
+    return {k: (r[col] if r else None) for k, col in EDGES.items()}
+
+
+def set_stage_edge(cam_id: str, edge: str, value: int | None) -> dict:
+    col = EDGES[edge]
+    with _lock:
+        con().execute("INSERT OR IGNORE INTO stage_edges (camera_id) VALUES (?)", (cam_id,))
+        con().execute(f"UPDATE stage_edges SET {col}=? WHERE camera_id=?", (value, cam_id))
+        con().commit()
+    return stage_edges(cam_id)
+
+
+def clear_stage_edges(cam_id: str) -> dict:
+    with _lock:
+        con().execute("DELETE FROM stage_edges WHERE camera_id=?", (cam_id,))
+        con().commit()
+    return stage_edges(cam_id)
 
 
 def log_status(cam_id: str, st: dict) -> None:
