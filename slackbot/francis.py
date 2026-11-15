@@ -73,6 +73,9 @@ def find_claude():
         os.path.join(os.environ.get("APPDATA", ""), "Claude", "claude-code", "*", "*", "claude.exe"),
         os.path.join(os.environ.get("LOCALAPPDATA", ""), "Packages", "Claude_*", "LocalCache",
                      "Roaming", "Claude", "claude-code", "*", "*", "claude.exe"),
+        # Newer desktop app versions (since about Nov 2026) keep it here instead.
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Claude-Data", "claude_*",
+                     "claude-code", "*", "*", "claude.exe"),
     ]
     found = sorted({p for pat in patterns for p in glob.glob(pat)}, key=os.path.getmtime)
     if not found:

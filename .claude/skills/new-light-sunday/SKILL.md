@@ -92,6 +92,7 @@ Read the full transcript.txt, using the notes as a guide, and write
   "live": {"guest": "Special Guest Worship Leader Russ Lee",
            "note": "Worship this morning was led by special guest worship leader Russ Lee."},
   "slides": [{"kicker": "Growth Rings", "text": "..."}],
+  "instagram_caption": "...",
   "notes_for_email": ["anything uncertain"]
 }
 ```
@@ -141,7 +142,19 @@ No dates or date-specific content. 5–10 tags.
 **Slides** — exactly 5, from what was actually said (never invent content): 1 = message
 title / big idea as a hook; 2–4 = one key point each (15–25 words, the pastor's language);
 5 = a closing application line only (the church invite is added underneath automatically). `kicker` = small label above the text
-(series name, "Point 1", etc.).
+(series name, "Point 1", etc.). For the designed carousel (Step 7): on slides 2–4 write the point as
+its own first sentence, then one short supporting sentence (the first sentence becomes the big
+headline); wrap the one key word or phrase of each slide in `*asterisks*` to show it in the series
+accent color (e.g. "Life is more than what you *own.* What you own doesn't…"). The plain slides
+ignore the asterisks.
+
+**Instagram caption** (`instagram_caption`, approved Nov 2, 2026) — ready to copy and paste:
+a one-line hook from the message, a line naming the speaker, series and message title, the
+big idea in the pastor's words, the points (with their scripture references), one key verse
+quoted exactly (name the translation shown on the slides/screen, e.g. NLT), a short
+"swipe / save / share" line, the church invite (📍 + config `church_invite`), and 5–7 hashtags
+(#NewLightChurch #Bladenboro + series/topic tags). A few emoji are fine. No dates or "this
+Sunday", and no claims about links or the bio.
 
 ## Step 4 — Render
 
@@ -165,19 +178,16 @@ it, and re-read the transcript around every cut once more.
 Style (approved Oct 26, 2026, "Combined A"): the pastor **cut out** of a real,
 sharpened camera frame, waist-up on the left with a warm glow, in front of the **series
 artwork** (crisp, dimmed); the series logo as a badge top-right; the big hook caption below it.
-Example: `work6-10-25	humbnail.jpg`.
-1. `pipeline
-lc.cmd thumb-frames --date <date>` → contact sheets
-   `work\<date>	humbs\sheet_*.jpg` (a frame every ~55 s, labeled with its second in the
+Example: `work\2026-10-25\thumbnail.jpg`.
+1. `pipeline\nlc.cmd thumb-frames --date <date>` → contact sheets
+   `work\<date>\thumbs\sheet_*.jpg` (a frame every ~55 s, labeled with its second in the
    edited sermon). Most of the sermon is a wide shot — look for the camera **close-ups** /
    medium shots where he's big in frame. Avoid ~0–12 s and the mid-sermon lower third.
-2. `pipeline
-lc.cmd thumb-frames --date <date> --around <sec>` → 12 frames 0.5 s apart; pick
+2. `pipeline\nlc.cmd thumb-frames --date <date> --around <sec>` → 12 frames 0.5 s apart; pick
    the moment where he looks good: facing the camera, eyes open, natural/confident expression.
    **Never** mid-blink, mid-word grimace, mouth wide open, eyes half shut, turned away.
-3. **Sharpest frame**: `pipeline
-lc.cmd thumb-frames --date <date> --around <sec> --raw --face <x>,<y>`
-   (face position as fractions of the frame) → `thumbsaw_<sec>.jpg`: every frame of the RAW
+3. **Sharpest frame**: `pipeline\nlc.cmd thumb-frames --date <date> --around <sec> --raw --face <x>,<y>`
+   (face position as fractions of the frame) → `thumbs\raw_<sec>.jpg`: every frame of the RAW
    camera file (X6 drive) within ±0.6 s, face close-ups labeled with their second and a
    sharpness score; the 5 sharpest have green borders. Pick the sharpest one **with a good
    expression** — the sharpest often catches a blink, so always look. Use its second as `at`.
@@ -197,8 +207,7 @@ lc.cmd thumb-frames --date <date> --around <sec> --raw --face <x>,<y>`
    a question or punchy key line from what was actually said that makes people want to
    click (e.g. "WINTER DOESN'T MEAN YOU'RE DEAD", "WHAT DO YOU NEED TO CUT?"). `caption`
    lines are white; `highlight` lines (the payoff word) are bigger, in the series accent color.
-5. `pipeline
-lc.cmd thumbnail --date <date>` → `work\<date>	humbnail.jpg` (1280×720), also
+5. `pipeline\nlc.cmd thumbnail --date <date>` → `work\<date>\thumbnail.jpg` (1280×720), also
    copied into the Sermons folder. It takes the frame straight from the raw recording (falls
    back to sermon.mp4 if the X6 drive is gone), sharpens it (denoise, 2× upscale, unsharp
    mask, a touch of contrast — **no AI face restore; never retouch, reshape or redraw him**),
@@ -277,6 +286,30 @@ to 10 min for Drive to sync the folder), and the same for the Sermons folder and
 find the folder and link it; failing that, give the G:\ path and flag it. (These links work
 for members of the shared drive — nothing is made public.)
 
+**Designed carousel (every week, approved Nov 2, 2026)** — after Step 4b (it reuses the
+thumbnail's cut-out of the pastor): `pipeline\nlc.cmd carousel --date <date>` (add `--test` in
+test mode) → `work\<date>\carousel_1.jpg … carousel_6.jpg` + `instagram_caption.txt`, copied
+into the same Instagram Slides folder as `<date> - Carousel <n>.jpg` and
+`<date> - Instagram caption.txt` (the plain slides stay too, so they can be edited by hand).
+Slide 1 = cover: the pastor in front of the series art, the series logo, the message title,
+speaker · series · week. Slides 2–6 = the 5 plan slides, on one panorama of the series
+background that flows across the swipe, inside a thin gold double frame, the `*key word*` in
+the accent color, the series logo at the bottom. **Look at all six**: nothing cut off, the
+pastor's cut-out clean, the title balanced, the highlight on the right word. Fix plan.json and re-run.
+Series theming comes from config `series_art`: `carousel_bg` = 1–2 plain backgrounds from the
+series art without the title (first = the cover, last = the panorama; falls back to the main
+art), optional `carousel_cover_focus` (0–1, which part of the cover background stays in view)
+and `carousel_pastor_at` (0–1, where his face sits across the cover). For a new series, look
+for those backgrounds next to the series art (e.g. `Dropbox\Sound Booth\Props\<Series>BG*.png`).
+
+**Send the carousel to Slack** (same Francis DM as the report): write a short
+`work\<date>\instagram_slack.md` ("*Instagram carousel for Sunday, <Mon d>: <Title>*", 6 slides
+in swipe order, caption comes next as its own message so it can be long-pressed and copied),
+then `cmd /c "pipeline\slack_dm.cmd --file work\<date>\instagram_slack.md --attach work\<date>\carousel_1.jpg … work\<date>\carousel_6.jpg"`,
+then `cmd /c "pipeline\slack_dm.cmd --file work\<date>\instagram_caption.txt"`. If the upload fails with
+`missing_scope`, the Francis app still needs Slack's **files:write** permission: send the
+Instagram Slides Drive link in its place (then the caption), and say so in the email.
+
 ## Step 7b — Subsplash (the live-broadcast media item)
 
 Each Sunday's 10am livestream lands in Subsplash as a media item (usually titled "Online
@@ -351,7 +384,8 @@ why not, series set); the thumbnail caption used
 skipped as already there, or what went wrong); the
 MP3 path; the song list (n, title, artist, length); the sermon range used and every cut
 made (with a few words each, so it's easy to spot-check); anything flagged; and the
-Google Drive links to the Instagram slides, the Sermons folder (video + MP3) and the Worship
+Google Drive links to the Instagram slides (the designed carousel + caption are in the same
+folder; say whether they went out on Slack), the Sermons folder (video + MP3) and the Worship
 songs folder. (Don't attach the slides — the link opens them on a phone, ready to post.)
 
 **Slack copy**: send the same report to Cory Hester in Slack (via the Francis bot). Write it

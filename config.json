@@ -32,6 +32,8 @@
     "Growth Rings": {"path": "C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Props\\Carved Growth Rings Log Poster.png",
                      "badge_crop": [0.138, 0.138, 0.879, 0.882], "accent": [255, 140, 40]},
     "Enough": {"path": "C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Props\\Enough Series Nov 2026.jpg",
-               "badge_crop": [0.15, 0.17, 0.84, 0.68], "accent": [232, 190, 80]}
+               "badge_crop": [0.16, 0.17, 0.84, 0.665], "accent": [232, 190, 80],
+               "carousel_bg": ["C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Props\\EnoughtBG.png",
+                               "C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Props\\EnoughtBG1.png"]}
   }
 }

@@ -10,6 +10,7 @@ This script does everything deterministic around that:
   python pipeline/nlc.py transcribe  --date YYYY-MM-DD     transcribe the recording (local Whisper)
   python pipeline/nlc.py render      --date YYYY-MM-DD     cut sermon (1080p) + radio MP3 + songs (480p)
   python pipeline/nlc.py slides      --date YYYY-MM-DD     build the 5 Instagram slides
+  python pipeline/nlc.py carousel    --date YYYY-MM-DD     designed carousel (pastor cover + series art) + caption
   python pipeline/nlc.py upload      --date YYYY-MM-DD     upload the sermon video to YouTube
   python pipeline/nlc.py drive-link  --path "G:\Shared drives\..."   Google Drive link for a synced folder or file
 
@@ -689,6 +690,7 @@ def cmd_slides(a):
     accent = tuple(CONFIG["brand_accent_rgb"])
     outs = []
     for i, sl in enumerate(slides, 1):
+        sl = {**sl, "text": sl["text"].replace("*", "")}  # *highlight* marks are for the carousel only
         img = Image.new("RGB", (W, H), (18, 20, 24))
         d = ImageDraw.Draw(img)
         for y in range(H):  # subtle vertical gradient
@@ -732,6 +734,250 @@ def cmd_slides(a):
         shutil.copy(o, dest)
     log("\n".join(outs))
     log(f"Copied to {dest}")
+
+
+def serif(size, style="b"):
+    """Georgia (b = bold, i = italic, z = bold italic) for carousel headlines — pairs with engraved series art."""
+    from PIL import ImageFont
+    p = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / f"georgia{style}.ttf"
+    return ImageFont.truetype(str(p), size) if p.exists() else font(size)
+
+
+def fit_cover(im, W, H, fx=0.5):
+    """Scale to cover W x H and crop, keeping fraction fx of the width centered."""
+    from PIL import Image
+    sc = max(W / im.width, H / im.height)
+    im = im.resize((int(im.width * sc) + 1, int(im.height * sc) + 1), Image.LANCZOS)
+    x = int(min(max(0, fx * im.width - W / 2), im.width - W))
+    y = (im.height - H) // 2
+    return im.crop((x, y, x + W, y + H))
+
+
+def fit_text(d, text, fnt_of, size, width, max_h, lead=1.2, floor=34):
+    """Largest size (from `size` down) whose wrapped lines fit width x max_h."""
+    while True:
+        f = fnt_of(size)
+        lines = wrap(d, text, f, width)
+        if len(lines) * size * lead <= max_h or size <= floor:
+            return f, size, lines
+        size -= 3
+
+
+def rich_words(text):
+    """'More *cannot* give' -> [("More", False), ("cannot", True), ...]; *a few words* works too."""
+    out, on = [], False
+    for w in text.split():
+        start, end = w.startswith("*"), w.rstrip(".,;:!?'\"").endswith("*")
+        if start:
+            on = True
+        out.append((w.replace("*", ""), on))
+        if end:
+            on = False
+    return out
+
+
+def draw_rich(d, lines, x, y, f, size, lead, color, accent, shadow=True):
+    """Draw already-wrapped lines word by word, highlighted words in the accent color."""
+    for ln in lines:
+        cx = x
+        for w, hi in ln:
+            if shadow:
+                d.text((cx + 3, y + 4), w, font=f, fill=(0, 0, 0))
+            d.text((cx, y), w, font=f, fill=accent if hi else color)
+            cx += d.textlength(w + " ", font=f)
+        y += size * lead
+    return y
+
+
+def fit_rich(d, text, fnt_of, size, width, max_h, lead=1.16, floor=34):
+    words = rich_words(text)
+    while True:
+        f = fnt_of(size)
+        lines, line = [], []
+        for w in words:
+            trial = " ".join(t for t, _ in line + [w])
+            if line and d.textlength(trial, font=f) > width:
+                lines.append(line)
+                line = [w]
+            else:
+                line.append(w)
+        if line:
+            lines.append(line)
+        if len(lines) * size * lead <= max_h or size <= floor:
+            return f, size, lines
+        size -= 3
+
+
+def series_logo(art, info, width):
+    from PIL import Image, ImageDraw
+    cl, ct, cr, cb = info.get("badge_crop", [0, 0, 1, 1])
+    logo = art.crop((int(cl * art.width), int(ct * art.height), int(cr * art.width), int(cb * art.height)))
+    logo = logo.resize((width, int(width * logo.height / logo.width)), Image.LANCZOS)
+    m = Image.new("L", logo.size, 0)
+    ImageDraw.Draw(m).rounded_rectangle([0, 0, *logo.size], max(8, width // 30), fill=255)
+    return logo, m
+
+
+def banknote_frame(img, accent, inset=44):
+    """Double hairline border, like the engraved edge of a bill."""
+    from PIL import Image, ImageDraw
+    W, H = img.size
+    ov = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(ov)
+    d.rectangle([inset, inset, W - inset, H - inset], outline=(*accent, 200), width=3)
+    d.rectangle([inset + 14, inset + 14, W - inset - 14, H - inset - 14], outline=(*accent, 110), width=1)
+    img.alpha_composite(ov)
+
+
+def cmd_carousel(a):
+    """Designed Instagram carousel (1080x1350): a cover with the pastor (the thumbnail's cut-out)
+    on the series art, then plan["slides"] on one panorama of the series background that flows
+    across the swipe — plus the caption from plan["instagram_caption"]. The plain slides stay as is."""
+    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+    date = sunday_of(a.date)
+    wd = workdir(date)
+    plan = load_plan(date)
+    th = plan["thumbnail"]
+    name, art_path, info = series_info(plan, th)
+    if not art_path:
+        die(f"No series art in config for '{name}' — add it to series_art first.")
+    accent = tuple(info.get("accent") or CONFIG["brand_accent_rgb"])
+    art = Image.open(art_path).convert("RGB")
+    bgs = [Path(p) for p in info.get("carousel_bg", []) if Path(p).exists()] or [art_path]
+    W, H, M = 1080, 1350, 110
+    slides = plan["slides"]
+    n_total = len(slides) + 1
+    sub = plan.get("lower_third_subtitle", name)
+    title = plan["youtube"]["title"].split(" | ")[0]
+    cream = (240, 232, 214)
+    outs = []
+
+    # ---- 1. cover: series art, the pastor, the series logo, the message title
+    bg = fit_cover(Image.open(bgs[0]).convert("RGB"), W, H, float(info.get("carousel_cover_focus", 0.28)))
+    img = ImageEnhance.Brightness(bg.filter(ImageFilter.GaussianBlur(1.2))).enhance(0.78).convert("RGBA")
+    shade = Image.linear_gradient("L").resize((W, H)).point(lambda v: int(250 * max(0, (v - 120) / 135) ** 1.3))
+    img = Image.composite(Image.new("RGBA", (W, H), (8, 10, 6, 255)), img, shade)
+    cut, (face_x, face_y) = pastor_cutout(wd, th)
+    s = H * 0.64 / cut.height
+    c = cut.resize((int(cut.width * s), int(cut.height * s)), Image.LANCZOS)
+    pos = (int(W * float(info.get("carousel_pastor_at", 0.66)) - face_x * s), H - c.height - 190)
+    halo = c.split()[3].filter(ImageFilter.MaxFilter(11)).filter(ImageFilter.GaussianBlur(22))
+    glow = Image.new("RGBA", c.size, (255, 190, 110, 0))
+    glow.putalpha(halo.point(lambda v: min(255, int(v * 1.2))))
+    img.alpha_composite(glow, pos)
+    img.alpha_composite(c, pos)
+    # deepen the bottom again over his sweater so the title reads
+    low = Image.linear_gradient("L").resize((W, H)).point(lambda v: int(235 * max(0, (v - 175) / 80)))
+    img = Image.composite(Image.new("RGBA", (W, H), (6, 8, 5, 255)), img, low)
+    logo, lm = series_logo(art, info, 760)
+    d = ImageDraw.Draw(img)
+    lx, ly = (W - logo.width) // 2, 70
+    d.rounded_rectangle([lx - 5, ly - 5, lx + logo.width + 5, ly + logo.height + 5], 30, fill=accent)
+    img.paste(logo, (lx, ly), lm)
+    d = ImageDraw.Draw(img)
+    tf, ts, tl = fit_text(d, title.upper(), lambda z: serif(z), 116, W - 2 * M, 260, lead=1.05)
+    if len(tl) == 2:  # balance the two lines ("THE LIE / OF MORE", not "THE LIE OF / MORE")
+        ws = title.upper().split()
+        k = min(range(1, len(ws)), key=lambda k: max(d.textlength(" ".join(ws[:k]), font=tf),
+                                                     d.textlength(" ".join(ws[k:]), font=tf)))
+        tl = [" ".join(ws[:k]), " ".join(ws[k:])]
+    y = H - 150 - len(tl) * ts * 1.05 - 40
+    for ln in tl:
+        x = (W - d.textlength(ln, font=tf)) / 2
+        d.text((x + 4, y + 5), ln, font=tf, fill=(0, 0, 0))
+        d.text((x, y), ln, font=tf, fill=cream)
+        y += ts * 1.05
+    meta = f"{plan['speaker'].upper()}   ·   {sub.upper()}"
+    mf = font(30)
+    d.text(((W - d.textlength(meta, font=mf)) / 2, y + 22), meta, font=mf, fill=accent)
+    banknote_frame(img, accent)
+    sw_f = font(26)
+    d = ImageDraw.Draw(img)
+    d.text((W - 76 - d.textlength("SWIPE  →", font=sw_f), H - 104), "SWIPE  →", font=sw_f, fill=(225, 220, 205))
+    outs.append(img)
+
+    # ---- 2..n: one panorama of the series background, sliced so it flows across the swipe
+    pano_src = Image.open(bgs[-1]).convert("RGB")
+    n = len(slides)
+    sc = max(H / pano_src.height, n * W / pano_src.width)
+    pano = pano_src.resize((int(pano_src.width * sc) + 1, int(pano_src.height * sc) + 1), Image.LANCZOS)
+    pano = pano.crop((0, (pano.height - H) // 2, n * W, (pano.height - H) // 2 + H)).filter(ImageFilter.GaussianBlur(2.5))
+    pano = ImageEnhance.Brightness(pano).enhance(0.55)
+    small_logo, sm = series_logo(art, info, 250)
+    roman = {"1": "I", "2": "II", "3": "III", "4": "IV", "5": "V"}
+    for i, sl in enumerate(slides, 1):
+        img = pano.crop(((i - 1) * W, 0, i * W, H)).convert("RGBA")
+        vig = Image.radial_gradient("L").resize((W, H)).point(lambda v: int(150 * (v / 255) ** 1.6))
+        img = Image.composite(Image.new("RGBA", (W, H), (4, 6, 3, 255)), img, vig)
+        d = ImageDraw.Draw(img)
+        kicker = sl.get("kicker", "")
+        num = kicker.split()[-1] if kicker.lower().startswith("point") else ""
+        if i == 1:
+            kicker = "The big idea"
+        if num in roman:  # big engraved-style numeral, faint, top right
+            nf = serif(330)
+            wm = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ImageDraw.Draw(wm).text((W - M - d.textlength(roman[num], font=nf), 120), roman[num], font=nf,
+                                    fill=(*accent, 60))
+            img.alpha_composite(wm)
+            d = ImageDraw.Draw(img)
+        text = sl["text"].strip()
+        m = re.search(r"([.!?]\*?)\s+", text)  # first sentence = headline, the rest = body
+        head, body = (text[:m.end(1)], text[m.end():]) if m else (text, "")
+        last = i == n
+        hf, hs, hl = fit_rich(d, head, lambda z: serif(z), 86 if body else 92, W - 2 * M, 470, lead=1.16)
+        bf, bs, bl = fit_rich(d, body, lambda z: font(z, bold=False), 46, W - 2 * M, 300, lead=1.35) if body else (None, 0, [])
+        inv_f = font(34, bold=False)
+        inv = wrap(d, CONFIG["church_invite"], inv_f, W - 2 * M) if last else []
+        block = 70 + len(hl) * hs * 1.16 + (48 + len(bl) * bs * 1.35 if bl else 0) + (66 + len(inv) * 46 if last else 0)
+        top, bottom = 230, H - 330  # between the frame top and the series logo
+        y = top + max(0, (bottom - top - block) / 2)
+        kf = font(30)
+        d.text((M, y), "  ".join(kicker.upper()), font=kf, fill=accent)
+        y += 70
+        y = draw_rich(d, hl, M, y, hf, hs, 1.16, cream, accent)
+        if bl:
+            y += 18
+            d.rectangle([M, y, M + 70, y + 5], fill=accent)
+            y += 30
+            y = draw_rich(d, bl, M, y, bf, bs, 1.35, (222, 216, 200), accent, shadow=False)
+        if last:  # church invite under the closing line
+            y += 36
+            d.rectangle([M, y, M + 70, y + 5], fill=accent)
+            y += 30
+            for ln in inv:
+                d.text((M, y), ln, font=inv_f, fill=(225, 220, 205))
+                y += 46
+        bx, by = (W - small_logo.width) // 2, H - 110 - small_logo.height
+        d.rounded_rectangle([bx - 3, by - 3, bx + small_logo.width + 3, by + small_logo.height + 3], 12, fill=accent)
+        img.paste(small_logo, (bx, by), sm)
+        banknote_frame(img, accent)
+        d = ImageDraw.Draw(img)
+        pf = font(24)
+        pg = f"{i + 1} / {n_total}"
+        d.text((W - 80 - d.textlength(pg, font=pf), H - 100), pg, font=pf, fill=(190, 185, 170))
+        d.text((80, H - 100), CONFIG["church_name"].upper(), font=pf, fill=(190, 185, 170))
+        outs.append(img)
+
+    files = []
+    for i, im in enumerate(outs, 1):
+        p = wd / f"carousel_{i}.jpg"
+        im.convert("RGB").save(p, quality=94)
+        files.append(p)
+    cap = plan.get("instagram_caption")
+    if cap:
+        (wd / "instagram_caption.txt").write_text(cap.strip() + "\n", encoding="utf-8")
+    else:
+        log('No "instagram_caption" in plan.json — caption file not written.')
+    log("\n".join(map(str, files)))
+    if not a.test:
+        dest = Path(CONFIG["media_folder"]) / "Instagram Slides" / date.isoformat()
+        dest.mkdir(parents=True, exist_ok=True)
+        for p in files:
+            shutil.copy(p, dest / f"{date.isoformat()} - Carousel {p.stem.split('_')[1]}.jpg")
+        if cap:
+            shutil.copy(wd / "instagram_caption.txt", dest / f"{date.isoformat()} - Instagram caption.txt")
+        log(f"Copied to {dest}")
 
 
 # ---------------------------------------------------------------- upload
@@ -1106,16 +1352,15 @@ def series_info(plan, th):
     return name, (art if art and art.exists() else None), info
 
 
-def cmd_thumbnail(a):
-    """1280x720 YouTube thumbnail from plan["thumbnail"]: the pastor cut out of a real (sharpened,
-    never retouched) frame, in front of the series artwork, with the series logo and a bold caption."""
-    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+def pastor_cutout(wd, th):
+    """The pastor cut out of the thumbnail frame (RGBA) and his face position inside the cut-out.
+    Cached in work\\<date>\\pastor_cutout.png/.json so the carousel reuses the thumbnail's shot."""
+    from PIL import Image
     from rembg import remove, new_session
-    date = sunday_of(a.date)
-    wd = workdir(date)
-    plan = load_plan(date)
-    th = plan["thumbnail"]
-    W, H = 1280, 720
+    png, meta = wd / "pastor_cutout.png", wd / "pastor_cutout.json"
+    key = {k: th.get(k) for k in ("at", "pastor_x", "pastor_y", "body_box", "fade_from", "raw")}
+    if png.exists() and meta.exists() and json.loads(meta.read_text())["key"] == key:
+        return Image.open(png), tuple(json.loads(meta.read_text())["face"])
     frame = wd / "thumb_frame.png"
     src, rt = raw_source(wd), sermon_to_raw(wd, th["at"])
     if src and rt is not None and th.get("raw", True):
@@ -1136,6 +1381,22 @@ def cmd_thumbnail(a):
     fade = Image.linear_gradient("L").resize(cut.size).point(
         lambda v: 255 if v < fs else int(255 * (255 - v) / max(1, 255 - fs)))
     cut.putalpha(Image.composite(cut.split()[3], Image.new("L", cut.size, 0), fade))
+    face = (fx - box[0], fy - box[1])
+    cut.save(png)
+    save_json(meta, {"key": key, "face": face})
+    return cut, face
+
+
+def cmd_thumbnail(a):
+    """1280x720 YouTube thumbnail from plan["thumbnail"]: the pastor cut out of a real (sharpened,
+    never retouched) frame, in front of the series artwork, with the series logo and a bold caption."""
+    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+    date = sunday_of(a.date)
+    wd = workdir(date)
+    plan = load_plan(date)
+    th = plan["thumbnail"]
+    W, H = 1280, 720
+    cut, (face_x, _) = pastor_cutout(wd, th)
 
     name, art_path, info = series_info(plan, th)
     accent = tuple(info.get("accent") or CONFIG["brand_accent_rgb"])
@@ -1148,7 +1409,8 @@ def cmd_thumbnail(a):
         bg = bg.crop(((bg.width - W) // 2, (bg.height - H) // 2, (bg.width - W) // 2 + W, (bg.height - H) // 2 + H))
         bg = ImageEnhance.Brightness(bg.filter(ImageFilter.GaussianBlur(1.5))).enhance(0.68)
     else:
-        bg = ImageEnhance.Brightness(img_src.resize((W, H)).filter(ImageFilter.GaussianBlur(12))).enhance(0.35)
+        stage = Image.open(wd / "thumb_frame.png").convert("RGB")
+        bg = ImageEnhance.Brightness(stage.resize((W, H)).filter(ImageFilter.GaussianBlur(12))).enhance(0.35)
         log(f"No series art in config for '{name}' — using a blurred stage background.")
     img = bg.convert("RGBA")
     # Darken the caption side so the words read.
@@ -1161,7 +1423,7 @@ def cmd_thumbnail(a):
     # Place him: height ~106% of the frame, face at pastor_at across; warm rim glow behind.
     s = H * 1.06 / cut.height
     c = cut.resize((int(cut.width * s), int(cut.height * s)), Image.LANCZOS)
-    face_in_c = (fx - box[0]) * s
+    face_in_c = face_x * s
     at = float(th.get("pastor_at", 0.2))
     px = int((at * W if side == "left" else (1 - at) * W) - face_in_c)
     pos = (px, H - c.height + 24)
@@ -1249,7 +1511,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("find", "notes", "transcribe", "audiomap", "render", "slides", "upload",
                  "youtube-login", "opus-upload", "pending", "drive-link",
-                 "thumbnail", "thumb-frames", "live"):
+                 "thumbnail", "thumb-frames", "live", "carousel"):
         p = sub.add_parser(name)
         if name == "pending":
             p.add_argument("--claim", action="store_true", help="mark the recording as being worked on")
@@ -1269,7 +1531,7 @@ def main():
             p.add_argument("--privacy", choices=["private", "unlisted", "public"])
             p.add_argument("--thumbnail-only", action="store_true",
                            help="just set thumbnail.jpg on the already-uploaded video")
-        if name == "thumbnail":
+        if name in ("thumbnail", "carousel"):
             p.add_argument("--test", action="store_true", help="don't copy it to Google Drive")
         if name == "thumb-frames":
             p.add_argument("--around", type=float, help="close look (0.5 s steps) around this second")
