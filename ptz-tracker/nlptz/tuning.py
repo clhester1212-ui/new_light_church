@@ -54,6 +54,15 @@ SPEC: dict[str, tuple] = {
                     "Uses the middle value of the head position over this long, so raised arms, bows and mic stands don't make it bob."),
     "head_y": (0.15, 0.05, 0.35, 0.01, "Up / down (tilt)", "Head height (no framing chosen)",
                "Where the top of the head sits, as part of the picture height from the top, when no framing is picked."),
+    # ---- smoothness (added 2026-11-13 after the first live test looked jerky in Tight) ----
+    "min_move": (1.0, 0.0, 3.0, 0.1, "Smoothness", "Shortest move (seconds)",
+                 "Once it starts panning or tilting, it keeps gliding at least this long (unless it would pass the person). Stops quick start-stop jerks."),
+    "min_rest": (1.2, 0.0, 4.0, 0.1, "Smoothness", "Rest between moves (seconds)",
+                 "After it stops, it waits this long before starting again, unless the person is near the edge of the shot."),
+    "tight_deadzone": (1.8, 1.0, 3.0, 0.1, "Smoothness", "Bigger still-zone when zoomed in",
+                       "When zoomed in a lot, small moves look big. The start/stop zones grow up to this many times when fully zoomed in, so it moves less often."),
+    "tilt_while_zooming": (0, 0, 1, 1, "Smoothness", "Tilt while zooming (1 = yes)",
+                           "Zooming makes the head appear to move. 0 = don't tilt during a zoom unless the head is about to leave the shot."),
     # ---- timing ----
     "video_delay": (0.5, 0.0, 1.5, 0.05, "Timing", "Video delay to allow for (seconds)",
                     "The camera's network video arrives a little late. The tracker allows for the moves it already made that the video doesn't show yet, so it doesn't overshoot. Use 'Measure video delay' to find the real number."),

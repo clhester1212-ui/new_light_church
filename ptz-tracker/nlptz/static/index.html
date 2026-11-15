@@ -5,195 +5,259 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>New Light Cameras</title>
 <style>
-  :root { --bg:#f4f5f7; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6eb;
-          --ok:#1a9b5b; --bad:#c43c3c; --warn:#b7791f; --accent:#2f5fd0; --btn:#eef1f6; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#14171c; --card:#1d2128; --ink:#e8eaee; --muted:#9aa3b2;
-          --line:#2c323c; --btn:#2a303a; --accent:#7aa2ff; } }
+  :root { --bg:#f2f3f6; --card:#fff; --ink:#1d2330; --muted:#667085; --line:#dfe3ea;
+          --ok:#1a9b5b; --bad:#c9372c; --warn:#b7791f; --accent:#2f5fd0; --accent-ink:#fff;
+          --tile:#e9edf4; --tile-hi:#dfe6f3; --active:#1f7a4d; --active-ink:#fff; --tag:#8a94a6; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#101318; --card:#191d24; --ink:#e8eaee;
+          --muted:#9aa3b2; --line:#2a303a; --tile:#252b35; --tile-hi:#2e3542; --accent:#6f97ff; --accent-ink:#0d1220;
+          --active:#2fa36b; --active-ink:#06140c; --tag:#7d8798; } }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui, "Segoe UI", sans-serif; }
-  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between;
-           padding:14px 16px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:2; }
-  h1 { font-size:18px; margin:0; }
-  .lock { display:flex; gap:8px; align-items:center; }
-  .pill { padding:4px 10px; border-radius:99px; font-size:13px; font-weight:600; }
-  .pill.locked { background:#e6e9ef; color:#374151; } .pill.unlocked { background:#fdecc8; color:#7a4a00; }
-  main { padding:16px; display:grid; gap:16px; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
-  .card.retired { opacity:.55; }
-  .head { padding:12px 14px; display:flex; justify-content:space-between; align-items:start; gap:8px; }
-  .head h2 { margin:0; font-size:17px; } .sub { color:var(--muted); font-size:13px; }
-  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; background:var(--muted); }
+
+  /* top bar */
+  header { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; justify-content:space-between;
+           padding:12px 16px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:3; }
+  h1 { font-size:18px; margin:0; letter-spacing:.2px; }
+  .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .pill { padding:5px 11px; border-radius:99px; font-size:13px; font-weight:600; }
+  .pill.locked { background:var(--tile); color:var(--muted); } .pill.unlocked { background:#fdecc8; color:#7a4a00; }
+  label.sw { display:flex; gap:6px; align-items:center; font-size:13px; color:var(--muted); }
+
+  /* cameras + their buttons, one column each */
+  .stage { display:grid; gap:16px; padding:16px; grid-template-columns:repeat(3, minmax(0, 1fr)); align-items:start; }
+  @media (max-width:1000px) { .stage { grid-template-columns:1fr; } }
+  .col { display:grid; gap:12px; min-width:0; }
+  .cam { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  .cam.steer { border-color:var(--warn); box-shadow:0 0 0 2px color-mix(in srgb, var(--warn) 35%, transparent); }
+  .camhead { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; }
+  .camhead h2 { margin:0; font-size:18px; display:flex; align-items:center; gap:8px; }
+  .camhead .model { color:var(--muted); font-size:12px; }
+  .badge { font-size:12px; font-weight:700; padding:3px 9px; border-radius:99px; background:var(--tile); color:var(--muted); white-space:nowrap; }
+  .badge.steer { background:#fdecc8; color:#7a4a00; } .badge.watch { background:#dbeafe; color:#1e40af; }
+  .dot { width:11px; height:11px; border-radius:50%; background:var(--muted); display:inline-block; }
   .dot.on { background:var(--ok); } .dot.off { background:var(--bad); }
-  .role { font-size:12px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); white-space:nowrap; }
   .pic { aspect-ratio:16/9; background:#000; display:flex; align-items:center; justify-content:center; color:#888; font-size:13px; }
   .pic img { width:100%; height:100%; object-fit:cover; display:block; }
-  .stats { display:flex; gap:14px; padding:8px 14px; font-size:13px; color:var(--muted); border-bottom:1px solid var(--line); }
-  .controls { padding:12px 14px; display:grid; gap:10px; }
+  .status { padding:8px 12px; font-size:13px; color:var(--muted); min-height:38px; }
+  .status b { color:var(--ink); }
+
+  /* big Stream Deck style buttons */
+  .deck { display:grid; gap:8px; grid-template-columns:repeat(4, minmax(0, 1fr)); }
+  .big { position:relative; min-height:78px; padding:20px 6px 8px; border-radius:12px; border:1px solid var(--line);
+         background:var(--tile); color:var(--ink); font:inherit; font-size:15px; font-weight:650; line-height:1.15;
+         cursor:pointer; display:flex; align-items:center; justify-content:center; text-align:center; overflow-wrap:anywhere; }
+  .big:hover:not(:disabled) { background:var(--tile-hi); border-color:var(--accent); }
+  .big:active:not(:disabled) { transform:translateY(1px); }
+  .big:disabled { opacity:.4; cursor:not-allowed; }
+  .big .tag { position:absolute; top:5px; left:8px; font-size:10px; font-weight:600; color:var(--tag); letter-spacing:.3px; }
+  .big.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .big.primary .tag { color:inherit; opacity:.7; }
+  .big.on { background:var(--active); color:var(--active-ink); border-color:var(--active); }
+  .big.on .tag { color:inherit; opacity:.75; }
+  .big.stop { background:var(--bad); color:#fff; border-color:var(--bad); font-size:20px; letter-spacing:1px; grid-column:span 2; }
+  .big.stop .tag { color:#fff; opacity:.75; }
+  .big.span2 { grid-column:span 2; }
+  .group { font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin:2px 2px -2px; }
+  .stopall { background:var(--bad); color:#fff; border:0; border-radius:10px; padding:9px 16px; font:inherit; font-weight:800; letter-spacing:.5px; cursor:pointer; }
+  .hbtn { font:inherit; font-size:14px; border:1px solid var(--line); background:var(--tile); color:var(--ink); border-radius:10px; padding:8px 12px; cursor:pointer; }
+  .hbtn.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+
+  /* setup (small controls) */
+  section.more { padding:0 16px 16px; display:grid; gap:12px; }
+  details.box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; }
+  details.box summary { cursor:pointer; font-weight:650; }
+  .setup { display:grid; gap:14px; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); margin-top:12px; }
+  .scard { border:1px solid var(--line); border-radius:12px; padding:10px 12px; display:grid; gap:10px; align-content:start; }
+  .scard h3 { margin:0; font-size:15px; }
   .row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .label { font-size:12px; color:var(--muted); width:100%; }
-  button { font:inherit; font-size:14px; border:1px solid var(--line); background:var(--btn); color:var(--ink);
-           border-radius:8px; padding:7px 11px; cursor:pointer; }
-  button:hover { border-color:var(--accent); }
-  button:disabled { opacity:.45; cursor:not-allowed; }
-  button.stop { background:var(--bad); color:#fff; border-color:var(--bad); font-weight:700; }
-  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-  select { font:inherit; font-size:14px; padding:6px 8px; border-radius:8px; border:1px solid var(--line); background:var(--btn); color:var(--ink); }
-  .pad { display:grid; grid-template-columns:repeat(3, 44px); gap:4px; }
-  .pad button { padding:7px 0; }
-  .note { font-size:12px; color:var(--muted); padding:0 14px 12px; }
-  section.log { padding:0 16px 24px; }
-  section.log h3 { font-size:15px; margin:4px 0 8px; }
-  #events { font-size:13px; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 14px; margin:0; list-style:none; }
-  #events li { padding:2px 0; }
-  #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#222; color:#fff; padding:8px 14px; border-radius:8px; font-size:14px; display:none; }
-  section.tune { padding:0 16px 16px; }
-  section.tune details { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 14px; }
-  section.tune summary { cursor:pointer; font-weight:600; }
+  .sub { color:var(--muted); font-size:13px; }
+  .sm { font:inherit; font-size:13px; border:1px solid var(--line); background:var(--tile); color:var(--ink); border-radius:8px; padding:6px 10px; cursor:pointer; }
+  .sm:hover:not(:disabled) { border-color:var(--accent); } .sm:disabled { opacity:.45; cursor:not-allowed; }
+  .sm.stop { background:var(--bad); color:#fff; border-color:var(--bad); font-weight:700; }
+  select { font:inherit; font-size:13px; padding:5px 8px; border-radius:8px; border:1px solid var(--line); background:var(--tile); color:var(--ink); }
+  .pad { display:grid; grid-template-columns:repeat(3, 42px); gap:4px; } .pad .sm { padding:6px 0; }
   .tgroup { margin-top:12px; } .tgroup h4 { margin:0 0 6px; font-size:14px; }
   .trow { display:grid; grid-template-columns:minmax(150px, 230px) 1fr 56px; gap:10px; align-items:center; padding:3px 0; font-size:13px; }
   .trow input[type=range] { width:100%; } .trow .val { font-variant-numeric:tabular-nums; text-align:right; }
   .trow .changed { color:var(--warn); font-weight:600; }
   .help { color:var(--muted); font-size:12px; grid-column:1 / -1; margin-top:-2px; }
-  label.sw { display:flex; gap:6px; align-items:center; font-size:13px; }
-  @media (max-width:420px) { main { grid-template-columns:1fr; padding:16px; } }
+  #events { font-size:13px; color:var(--muted); margin:8px 0 0; padding:0; list-style:none; max-height:260px; overflow:auto; }
+  #events li { padding:2px 0; }
+  #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#222; color:#fff; padding:9px 15px; border-radius:9px; font-size:14px; display:none; z-index:5; max-width:calc(100% - 32px); }
+  @media (max-width:520px) { .trow { grid-template-columns:1fr 56px; } .trow input[type=range] { grid-column:1 / -1; grid-row:2; } }
 </style>
 </head>
 <body>
 <header>
   <h1>New Light Cameras</h1>
-  <div class="lock">
-    <label class="sw" title="Lets Companion buttons (URLs ending in from=deck) move cameras without unlocking here"><input type="checkbox" id="deckSw"> Stream Deck control</label>
+  <div class="bar">
+    <button class="stopall" id="stopAll" title="Stops every camera and ends any tracking that is steering">STOP ALL</button>
     <span id="lockPill" class="pill locked">Moves locked</span>
-    <button id="lockBtn" class="primary">Unlock moves (10 min)</button>
+    <button id="lockBtn" class="hbtn primary">Unlock moves (10 min)</button>
+    <label class="sw" title="Lets Companion buttons (URLs ending in from=deck) move cameras without unlocking here"><input type="checkbox" id="deckSw"> Stream Deck control</label>
   </div>
 </header>
-<main id="cams"></main>
-<section class="tune"><details id="tuneBox"><summary>Tracking settings (live, saved automatically)</summary>
-  <div class="sub" style="margin-top:6px">Changes take effect right away. Yellow numbers differ from the starting value.
-  <button id="tuneReset" style="margin-left:8px">Reset all to starting values</button></div>
-  <div id="tune"></div></details></section>
-<section class="log"><h3>Recent activity</h3><ul id="events"></ul></section>
+
+<main class="stage" id="stage"></main>
+
+<section class="more">
+  <details class="box" id="setupBox"><summary>Setup and fine control: nudge, manual presets, stage edges, testing</summary>
+    <div class="setup" id="setup"></div></details>
+  <details class="box" id="tuneBox"><summary>Tracking settings (live, saved automatically)</summary>
+    <div class="sub" style="margin-top:6px">Changes take effect right away. Yellow numbers differ from the starting value.
+    <button class="sm" id="tuneReset" style="margin-left:8px">Reset all to starting values</button></div>
+    <div id="tune"></div></details>
+  <details class="box" open><summary>Recent activity</summary><ul id="events"></ul></details>
+</section>
 <div id="toast"></div>
+
 <script>
 const $ = s => document.querySelector(s);
-let unlocked = false, built = false;
+let unlocked = false, built = false, cams = [];
+const ORDER = { left: 0, stage: 1, right: 2 };          // left to right, as seen from the booth
+const LETTER = { left: 'L', stage: 'S', right: 'R' };   // button numbers for matching to Companion later
 
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block';
-  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', 2500); }
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', 2600); }
 
-async function post(url) {
+async function call(url) {
   const r = await fetch(url, { method: 'POST' });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) toast(j.error || 'Something went wrong');
-  refresh();
+  return { ok: r.ok, j };
+}
+async function post(url) { const res = await call(url); refresh(); refreshTrack(); return res; }
+
+// ---- the big buttons for each camera (numbered L1, S1, R1... for Companion) ----
+function trackButtons(c) {
+  const t = `/api/track/${c.id}`;
+  const preach = c.presets.find(p => /preach/i.test(p.name));
+  return [
+    { group: 'Tracking' },
+    { label: 'Track ON', url: `${t}/steer`, mv: 1, cls: 'primary', key: 'steer' },
+    { label: 'Watch only', url: `${t}/watch`, key: 'watch' },
+    { label: 'Re-lock center', url: `${t}/relock` },
+    { label: 'Tracking off', url: `${t}/off`, key: 'off' },
+    { group: 'Framing while tracking' },
+    { label: 'Tight', url: `${t}/frame?size=tight`, mv: 1, key: 'tight' },
+    { label: 'Medium', url: `${t}/frame?size=medium`, mv: 1, key: 'medium' },
+    { label: 'Wide', url: `${t}/frame?size=wide`, mv: 1, key: 'wide' },
+    { label: 'Slow pull-out', url: `${t}/pullout`, mv: 1, key: 'pullout' },
+    { label: 'Hold zoom', url: `${t}/frame?size=hold`, mv: 1, key: 'hold' },
+    preach ? { label: `${preach.name} + track`, url: `${t}/preset/${preach.number}`, mv: 1 } : null,
+    { label: 'STOP', url: `/api/cameras/${c.id}/stop`, cls: 'stop', stop: 1 },
+  ].filter(Boolean);
+}
+function presetButtons(c) {
+  return [{ group: 'Presets' },
+    ...c.presets.map(p => ({ label: p.name, url: `/api/cameras/${c.id}/preset/${p.number}`, mv: 1, title: `Preset ${p.number}` })),
+    { label: 'STOP', url: `/api/cameras/${c.id}/stop`, cls: 'stop', stop: 1 }];
+}
+function deckHtml(c) {
+  const items = c.role === 'track' ? trackButtons(c) : presetButtons(c);
+  let n = 0, html = '', open = false;
+  for (const b of items) {
+    if (b.group) { if (open) html += '</div>'; html += `<div class="group">${b.group}</div><div class="deck">`; open = true; continue; }
+    n++;
+    html += `<button class="big ${b.cls || ''}" data-url="${b.url}" ${b.mv ? 'data-mv' : ''} ${b.stop ? 'data-stopbtn' : ''}
+      ${b.key ? `data-key="${c.id}:${b.key}"` : ''} title="${b.title || ''}"><span class="tag">${LETTER[c.id] || c.id}${n}</span>${b.label}</button>`;
+  }
+  return html + (open ? '</div>' : '');
 }
 
-const roleText = { track: 'Will auto-track', presets: 'Presets only', retired: 'Not responding / old' };
+// ---- fine controls (in Setup) ----
+function setupHtml(c) {
+  if (c.role === 'retired') return `<div class="scard"><h3>${c.name}</h3><div class="sub">${c.model || ''} · ${c.ip} · not used (doesn't answer)</div></div>`;
+  const edges = c.role !== 'track' ? '' : `
+    <div class="row"><span class="label">Stay on stage: aim the camera at each edge of the stage with the nudge buttons, then press that edge. Tracking won't steer past them.</span>
+      <button class="sm" data-edge="/api/cameras/${c.id}/edge?set=left">◀ Left edge here</button>
+      <button class="sm" data-edge="/api/cameras/${c.id}/edge?set=right">Right edge here ▶</button>
+      <button class="sm" data-edge="/api/cameras/${c.id}/edge?set=low">▼ Bottom edge here</button>
+      <button class="sm" data-edge="/api/cameras/${c.id}/edge?set=high">▲ Top edge here</button>
+      <button class="sm" data-edge="/api/cameras/${c.id}/edge?clear=1">Clear edges</button>
+      <span class="sub" id="edges-${c.id}"></span></div>
+    <div class="row"><span class="label">Go to any preset, then track whoever is center there</span>
+      <select id="tp-${c.id}">${c.presets.map(p => `<option value="${p.number}">${p.name}</option>`).join('')}</select>
+      <button class="sm" data-trkpreset="${c.id}" data-mv>Go + track</button></div>
+    <div class="row"><span class="label">Testing</span>
+      <button class="sm" data-rec="${c.id}">Record test video</button>
+      <button class="sm" data-url="/api/track/${c.id}/measure-delay" data-mv data-slow="Measuring video delay (about 10 seconds)…">Measure video delay</button></div>`;
+  return `<div class="scard"><h3>${c.name}</h3>
+    <div class="sub">${c.model || ''} · ${c.ip}${c.serial ? ' · SN ' + c.serial : ''}</div>
+    <div class="sub" id="stats-${c.id}">Checking…</div>
+    <div class="row"><span class="label">Presets (camera only, no tracking)</span>
+      ${c.presets.map(p => `<button class="sm" data-url="/api/cameras/${c.id}/preset/${p.number}" data-mv title="Preset ${p.number}">${p.name}</button>`).join('') || '<span class="sub">none saved</span>'}</div>
+    <div class="row" style="gap:18px; align-items:start">
+      <div><span class="label">Nudge</span><div class="pad">
+        <span></span><button class="sm" data-url="/api/cameras/${c.id}/nudge?dir=up" data-mv>▲</button><span></span>
+        <button class="sm" data-url="/api/cameras/${c.id}/nudge?dir=left" data-mv>◀</button>
+        <button class="sm" data-url="/api/cameras/${c.id}/home" data-mv title="Home">⌂</button>
+        <button class="sm" data-url="/api/cameras/${c.id}/nudge?dir=right" data-mv>▶</button>
+        <span></span><button class="sm" data-url="/api/cameras/${c.id}/nudge?dir=down" data-mv>▼</button><span></span></div></div>
+      <div><span class="label">Zoom</span><div class="row">
+        <button class="sm" data-url="/api/cameras/${c.id}/zoom?dir=in" data-mv>Zoom in</button>
+        <button class="sm" data-url="/api/cameras/${c.id}/zoom?dir=out" data-mv>Zoom out</button>
+        <button class="sm stop" data-url="/api/cameras/${c.id}/stop" data-stopbtn>STOP</button></div></div>
+    </div>${edges}
+    ${c.notes ? `<div class="sub">${c.notes}</div>` : ''}</div>`;
+}
 
-function build(cams) {
-  $('#cams').innerHTML = cams.map(c => {
-    const track = c.role !== 'track' ? '' : `
-      <div class="controls trackbox">
-        <div class="row"><span class="label">Auto-tracking</span>
-          <button class="primary" data-trk="/api/track/${c.id}/steer" data-mv-trk>Track ON</button>
-          <button data-trk="/api/track/${c.id}/watch">Watch only</button>
-          <button data-trk="/api/track/${c.id}/relock">Re-lock center</button>
-          <button data-trk="/api/track/${c.id}/off">Tracking off</button>
-        </div>
-        <div class="row"><span class="label">Framing while tracking (zooms slowly, keeps them centered)</span>
-          <button data-trk="/api/track/${c.id}/frame?size=tight" data-mv-trk>Tight</button>
-          <button data-trk="/api/track/${c.id}/frame?size=medium" data-mv-trk>Medium</button>
-          <button data-trk="/api/track/${c.id}/frame?size=wide" data-mv-trk>Wide</button>
-          <button data-trk="/api/track/${c.id}/pullout" data-mv-trk>Slow pull-out</button>
-          <button data-trk="/api/track/${c.id}/frame?size=hold" data-mv-trk>Hold zoom</button>
-        </div>
-        <div class="row"><span class="label">Go to a preset, then track whoever is center there</span>
-          <select id="tp-${c.id}">${c.presets.map(p => `<option value="${p.number}">${p.name}</option>`).join('')}</select>
-          <button data-trkpreset="${c.id}" data-mv-trk>Go + track</button>
-        </div>
-        <div class="row"><span class="label">Stay on stage: aim the camera at each edge of the stage (with the nudge buttons), then press that edge. Tracking won't steer past them.</span>
-          <button data-edge="/api/cameras/${c.id}/edge?set=left">◀ Left edge here</button>
-          <button data-edge="/api/cameras/${c.id}/edge?set=right">Right edge here ▶</button>
-          <button data-edge="/api/cameras/${c.id}/edge?set=low">▼ Bottom edge here</button>
-          <button data-edge="/api/cameras/${c.id}/edge?set=high">▲ Top edge here</button>
-          <button data-edge="/api/cameras/${c.id}/edge?clear=1">Clear edges</button>
-          <span class="sub" id="edges-${c.id}"></span>
-        </div>
-        <div class="row"><span class="label">Testing</span>
-          <button data-rec="${c.id}">Record test video</button>
-          <button data-trk="/api/track/${c.id}/measure-delay" data-mv-trk data-slow="Measuring video delay (about 10 seconds)…">Measure video delay</button>
-        </div>
-        <div class="sub" id="ts-${c.id}">Not tracking</div>
-      </div>`;
-    const moves = c.role === 'retired' ? '' : `
-      <div class="controls">
-        <div class="row"><span class="label">Presets</span>
-          ${c.presets.map(p => `<button data-mv="/api/cameras/${c.id}/preset/${p.number}" title="Preset ${p.number}">${p.name}</button>`).join('') || '<span class="sub">none saved</span>'}
-        </div>
-        <div class="row" style="gap:18px; align-items:start">
-          <div><span class="label">Nudge</span>
-            <div class="pad">
-              <span></span><button data-mv="/api/cameras/${c.id}/nudge?dir=up">▲</button><span></span>
-              <button data-mv="/api/cameras/${c.id}/nudge?dir=left">◀</button>
-              <button data-mv="/api/cameras/${c.id}/home" title="Home">⌂</button>
-              <button data-mv="/api/cameras/${c.id}/nudge?dir=right">▶</button>
-              <span></span><button data-mv="/api/cameras/${c.id}/nudge?dir=down">▼</button><span></span>
-            </div></div>
-          <div><span class="label">Zoom</span>
-            <div class="row"><button data-mv="/api/cameras/${c.id}/zoom?dir=in">Zoom in</button>
-            <button data-mv="/api/cameras/${c.id}/zoom?dir=out">Zoom out</button></div>
-            <div class="row" style="margin-top:10px"><button class="stop" data-stop="/api/cameras/${c.id}/stop">STOP</button></div>
-          </div>
-        </div>
-      </div>`;
-    return `<div class="card ${c.role === 'retired' ? 'retired' : ''}" id="card-${c.id}">
-      <div class="head"><div><h2><span class="dot" id="dot-${c.id}"></span>${c.name}</h2>
-        <div class="sub">${c.model || ''} · ${c.ip}${c.serial ? ' · SN ' + c.serial : ''}</div></div>
-        <span class="role">${roleText[c.role] || c.role}</span></div>
-      ${c.role === 'retired' ? '' : `<div class="pic" id="pic-${c.id}">Loading picture…</div>`}
-      <div class="stats" id="stats-${c.id}">Checking…</div>
-      ${track}
-      ${moves}
-      ${c.notes ? `<div class="note">${c.notes}</div>` : ''}
-    </div>`;
-  }).join('');
-  document.querySelectorAll('[data-mv]').forEach(b => b.onclick = () => post(b.dataset.mv));
-  document.querySelectorAll('[data-stop]').forEach(b => b.onclick = () => post(b.dataset.stop));
-  document.querySelectorAll('[data-trk]').forEach(b => b.onclick = async () => {
+function build(list) {
+  cams = list;
+  const shown = list.filter(c => c.role !== 'retired').sort((a, b) => (ORDER[a.id] ?? 9) - (ORDER[b.id] ?? 9));
+  $('#stage').innerHTML = shown.map(c => `
+    <div class="col">
+      <div class="cam" id="cam-${c.id}">
+        <div class="camhead"><h2><span class="dot" id="dot-${c.id}"></span>${c.name}</h2>
+          <span class="badge" id="badge-${c.id}">${c.role === 'track' ? 'Not tracking' : 'Presets'}</span></div>
+        <div class="pic" id="pic-${c.id}">Loading picture…</div>
+        <div class="status" id="ts-${c.id}">${c.role === 'track' ? 'Not tracking' : (c.model || '')}</div>
+      </div>
+      ${deckHtml(c)}
+    </div>`).join('');
+  $('#setup').innerHTML = list.slice().sort((a, b) => (ORDER[a.id] ?? 9) - (ORDER[b.id] ?? 9)).map(setupHtml).join('');
+
+  document.querySelectorAll('[data-url]').forEach(b => b.onclick = async () => {
     if (b.dataset.slow) { toast(b.dataset.slow); b.disabled = true; }
-    const r = await fetch(b.dataset.trk, { method: 'POST' });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) toast(j.error || 'Something went wrong');
-    else if (j.delay !== undefined) { toast(`Video delay: ${j.delay} s (setting updated)`); loadTuning(); }
+    const { ok, j } = await call(b.dataset.url);
+    if (ok && j.delay !== undefined) { toast(`Video delay: ${j.delay} s (setting updated)`); loadTuning(); }
     b.disabled = false; refresh(); refreshTrack(); });
   document.querySelectorAll('[data-edge]').forEach(b => b.onclick = async () => {
     if (b.dataset.edge.includes('clear=1') && !confirm('Clear all stage edges for this camera?')) return;
-    const r = await fetch(b.dataset.edge, { method: 'POST' });
-    const j = await r.json().catch(() => ({}));
-    toast(r.ok ? j.detail : (j.error || 'Something went wrong'));
+    const { ok, j } = await call(b.dataset.edge);
+    if (ok) toast(j.detail);
     refresh(); });
   document.querySelectorAll('[data-rec]').forEach(b => b.onclick = () => {
     const id = b.dataset.rec, on = !(tracking[id] && tracking[id].recording);
-    post(`/api/track/${id}/record?on=${on ? 1 : 0}`).then(refreshTrack); });
+    post(`/api/track/${id}/record?on=${on ? 1 : 0}`); });
   document.querySelectorAll('[data-trkpreset]').forEach(b => b.onclick = () => {
-    const id = b.dataset.trkpreset; post(`/api/track/${id}/preset/${$('#tp-' + id).value}`).then(refreshTrack); });
+    const id = b.dataset.trkpreset; post(`/api/track/${id}/preset/${$('#tp-' + id).value}`); });
   built = true;
 }
 
 let tracking = {};
 async function refreshTrack() {
   const r = await fetch('/api/track'); tracking = await r.json();
-  for (const [id, s] of Object.entries(tracking)) {
-    const el = $('#ts-' + id); if (!el) continue;
-    const rb = document.querySelector(`[data-rec="${id}"]`);
+  for (const c of cams.filter(c => c.role === 'track')) {
+    const s = tracking[c.id] || { mode: 'off' };
+    const el = $('#ts-' + c.id), badge = $('#badge-' + c.id), card = $('#cam-' + c.id);
+    if (!el) continue;
+    // light up the button for what it's doing now
+    const active = new Set([s.mode]);
+    if (s.mode !== 'off' && s.framing) active.add(s.pullout ? 'pullout' : s.framing);
+    document.querySelectorAll(`[data-key^="${c.id}:"]`).forEach(b => b.classList.toggle('on', active.has(b.dataset.key.split(':')[1]) && b.dataset.key !== `${c.id}:steer`));
+    const steerBtn = document.querySelector(`[data-key="${c.id}:steer"]`);
+    if (steerBtn) steerBtn.classList.toggle('on', s.mode === 'steer');
+    badge.className = 'badge ' + (s.mode === 'steer' ? 'steer' : s.mode === 'watch' ? 'watch' : '');
+    badge.textContent = s.mode === 'steer' ? 'TRACKING' : s.mode === 'watch' ? 'Watching' : 'Not tracking';
+    card.classList.toggle('steer', s.mode === 'steer');
+    const rb = document.querySelector(`[data-rec="${c.id}"]`);
     if (rb) { rb.textContent = s.recording ? '■ Stop recording' : 'Record test video'; rb.classList.toggle('stop', !!s.recording); }
     if (s.mode === 'off') { el.textContent = 'Not tracking'; continue; }
-    const who = s.target ? `following for ${s.following_for}s` : '';
-    const mode = s.mode === 'steer' ? '<b style="color:#c47a00">STEERING</b>' : 'Watch only';
-    const fr = s.framing ? ` · framing: ${s.framing}` : '';
-    el.innerHTML = `${mode} · <b>${s.status}</b> ${who ? '· ' + who : ''} · sees ${s.people.length} people · ` +
-      `${s.mode === 'steer' ? 'doing' : 'would'}: <b>${s.would || '—'}</b>${fr} · ${s.fps} fps` +
-      (s.shadows_ignored ? ` · ${s.shadows_ignored} shadow(s) skipped` : '') + (s.recording ? ' · <b style="color:#c43c3c">● recording</b>' : '');
+    const who = s.target ? ` · following for ${s.following_for}s` : '';
+    el.innerHTML = `<b>${s.status}</b>${who} · sees ${s.people.length} · ${s.mode === 'steer' ? 'doing' : 'would'}: <b>${s.would || '—'}</b>` +
+      (s.recording ? ' · <b style="color:var(--bad)">● recording</b>' : '');
   }
 }
 // While a camera is tracking, its picture shows the tracker's view with boxes, refreshed often.
@@ -214,14 +278,14 @@ async function refresh() {
   $('#lockPill').className = 'pill ' + (unlocked ? 'unlocked' : 'locked');
   $('#lockPill').textContent = unlocked ? `Moves unlocked · ${Math.ceil(d.unlocked_seconds_left / 60)} min left` : 'Moves locked';
   $('#lockBtn').textContent = unlocked ? 'Lock moves now' : 'Unlock moves (10 min)';
-  document.querySelectorAll('[data-mv], [data-mv-trk]').forEach(b => b.disabled = !unlocked);
+  document.querySelectorAll('[data-mv]').forEach(b => { if (!b.dataset.slow || !b.disabled) b.disabled = !unlocked; });
   $('#deckSw').checked = !!d.deck_enabled;
   for (const c of d.cameras) {
     const s = c.live, dot = $('#dot-' + c.id), st = $('#stats-' + c.id);
-    if (!dot) continue;
-    dot.className = 'dot ' + (s ? (s.online ? 'on' : 'off') : '');
-    st.textContent = !s ? 'Checking…' : !s.online ? 'Not answering' :
+    if (dot) dot.className = 'dot ' + (s ? (s.online ? 'on' : 'off') : '');
+    if (st) st.textContent = !s ? 'Checking…' : !s.online ? 'Not answering' :
       `Power ${s.power} · Pan ${s.pan ?? '?'} · Tilt ${s.tilt ?? '?'} · Zoom ${s.zoom ?? '?'}`;
+    if (c.role !== 'track') { const ts = $('#ts-' + c.id); if (ts) ts.textContent = !s ? 'Checking…' : s.online ? `${c.model || ''} · online` : 'Not answering'; }
     const ed = $('#edges-' + c.id), e = c.edges || {};
     if (ed) {
       const set = [['left', 'left'], ['right', 'right'], ['low', 'bottom'], ['high', 'top']].filter(([k]) => e[k] != null);
@@ -258,7 +322,7 @@ async function loadTuning() {
     r.oninput = () => { const v = $('#tv-' + r.dataset.key); v.textContent = r.value; v.classList.toggle('changed', r.value != def); };
     r.onchange = async () => {
       const res = await fetch(`/api/tuning?${r.dataset.key}=${r.value}`, { method: 'POST' });
-      if (!res.ok) toast('Could not save that setting'); else toast('Saved');
+      toast(res.ok ? 'Saved' : 'Could not save that setting');
     };
   });
 }
@@ -266,10 +330,14 @@ $('#tuneReset').onclick = async () => {
   if (!confirm('Put every tracking setting back to its starting value?')) return;
   await fetch('/api/tuning/reset', { method: 'POST' }); loadTuning(); toast('Settings reset');
 };
+$('#stopAll').onclick = async () => {
+  await Promise.all(cams.filter(c => c.role !== 'retired').map(c => fetch(`/api/cameras/${c.id}/stop`, { method: 'POST' })));
+  toast('All cameras stopped'); refresh(); refreshTrack();
+};
 $('#deckSw').onchange = e => post('/api/deck?on=' + (e.target.checked ? 1 : 0));
-loadTuning();
 $('#lockBtn').onclick = () => post(unlocked ? '/api/moves/lock' : '/api/moves/unlock');
-refresh().then(refreshPics);
+loadTuning();
+refresh().then(refreshTrack).then(refreshPics);
 setInterval(refresh, 3000);
 setInterval(() => { if (!document.hidden) { refreshTrack(); refreshTrackPics(); } }, 700);
 setInterval(() => { if (!document.hidden) refreshPics(); }, 6000);

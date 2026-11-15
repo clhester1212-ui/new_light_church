@@ -14,7 +14,11 @@ Then open **http://localhost:8890** on the Stream Deck PC.
 
 ## What you'll see
 
-- One card per camera: online dot, model, IP, serial, a still picture that refreshes every few seconds, and the camera's pan, tilt and zoom.
+The three cameras sit across the top, in order: **Left**, **Stage (back)**, **Right**. Each shows its picture, or the tracker's view while tracking, and a badge reading **TRACKING**, **Watching** or **Not tracking**. Under each camera is a grid of large buttons for it, numbered **L1–L11**, **S1–S10** and **R1–R11**, so they can be matched to Stream Deck buttons in Companion later. The button for what a camera is doing right now lights up green. **STOP ALL** in the top bar stops every camera.
+
+The small controls are in **Setup and fine control** further down: nudge, zoom, presets without tracking, stage edges, test video and measuring the video delay.
+
+- Setup has one card per camera: online dot, model, IP, serial, a still picture that refreshes every few seconds, and the camera's pan, tilt and zoom.
 - **Moves are locked** when the app starts. Click **Unlock moves (10 min)** to use the preset, nudge and zoom buttons. They lock again by themselves after 10 minutes. **STOP** always works.
 - **Recent activity** lists every move, unlock, and camera dropping offline or coming back.
 
@@ -49,6 +53,10 @@ How it behaves:
 - **Choosing someone:** before locking on, it has to see the same person in 5 of the last 8 frames (about 1 second) with confidence of at least 0.6. It also skips anything much shorter than the tallest person in the shot (stage lights, mic stands), and any figure right beside someone whose feet are lower (a shadow on the screen).
 - **Losing them:** if it misses them for a moment, it keeps easing along for up to half a second. If it loses them for 2.5 seconds, the camera holds still and it looks for the center person again.
 - **Dead zone:** small sways in the middle don't move the camera. It starts moving past 10% off center and stops once within 4%. Speeds depend on zoom, so a tight shot moves gently, and speed changes are eased so starts and stops aren't jerky.
+- **Smoothness:** each move lasts at least 1 second, and after stopping it rests 1.2 seconds before moving again, unless the person is near the edge of the shot. The still zone in the middle grows when zoomed in, and it doesn't tilt during a zoom. All of these can be changed under **Tracking settings → Smoothness**. They were added after the first live test, where Tight looked jerky because the camera started and stopped about once a second.
+- **Real camera speeds:** the SRG-300SE pans at about 0.47 times the textbook Sony speed curve (measured: speed 1 is about 0.5°/s, and 51 position units = 1°). This is `SPEED_SCALE` in `tracker.py`. Before it was measured, the tracker thought it had caught up too soon, which caused most of the jerkiness.
+- **Losing someone in Tight or Medium:** it eases the zoom out a little for up to 8 seconds to find them again, and remembers their height for 20 seconds, so it goes straight back to the framing.
+- **Zoom limit:** Tight never goes past about 25x (800 short of the optical limit), so it never slips into blurry digital zoom.
 - **Tilt:** gentler than pan. It uses the middle value of the head position over the last second, so raised hands and bows don't make the shot bob.
 - **Video delay:** the network video is a little late. The tracker allows for moves it already made that the picture doesn't show yet, so it doesn't overshoot.
 - **Framing:** it measures the person's height whenever their whole body is visible. If it hasn't yet, Tight/Medium/Wide first zooms out a little to measure.

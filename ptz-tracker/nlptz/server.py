@@ -200,12 +200,12 @@ class Handler(BaseHTTPRequestHandler):
                     if size not in ("tight", "medium", "wide", "hold"):
                         return self._json({"error": "size must be tight/medium/wide/hold"}, 400)
                     t.set_framing(None if size == "hold" else size, int(q.get("speed", 1)))
-                    if t.mode == "off":
-                        t.start("steer")
+                    if t.mode != "steer":   # a framing button means "track with this framing",
+                        t.start("steer")    # even right after STOP (which leaves it watching)
                     detail = f"{size}, zoom speed {t.zoom_speed}"
                 elif act == "pullout":
                     t.set_framing("wide", 0, out_only=True)  # slowest zoom speed, never zooms in
-                    if t.mode == "off":
+                    if t.mode != "steer":
                         t.start("steer")
                     detail = "slow pull-out to wide"
                 elif act == "record":

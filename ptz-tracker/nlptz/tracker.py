@@ -77,19 +77,28 @@ def zoom_for_magnification(mag: float) -> int:
     return int(round(math.log(mag) / math.log(OPTICAL_ZOOM) * ZOOM_OPTICAL_MAX))
 
 
+# Measured on the Right SRG-300SE, 2026-11-13: real pan speeds were about 0.47x the
+# "1.1 to 100 deg/s" curve (speed 1 = 26 units/s = about 0.5 deg/s, speed 6 = 80 units/s,
+# speed 12 = 222+ units/s; 51 units per degree, checked against the picture shift). Using
+# the unscaled curve made the tracker think it had caught up too soon, so it stopped after
+# a fraction of a second: the jerky stop-and-go seen in Tight.
+SPEED_SCALE = 0.47
+_SLOW, _FAST = 1.1 * SPEED_SCALE, 100 * SPEED_SCALE
+
+
 def deg_per_sec_to_speed(v: float, top: int) -> int:
-    """Sony pan/tilt speed 1..24 runs from about 1.1 to 100 deg/s, roughly exponentially."""
+    """Sony pan/tilt speed 1..24, roughly exponential (see SPEED_SCALE)."""
     if v <= 0:
         return 0
-    s = 1 + 23 * math.log(max(v, 1.1) / 1.1) / math.log(100 / 1.1)
+    s = 1 + 23 * math.log(max(v, _SLOW) / _SLOW) / math.log(_FAST / _SLOW)
     return max(1, min(top, int(round(s))))
 
 
 def speed_to_deg_per_sec(s: int) -> float:
-    """Inverse of deg_per_sec_to_speed (used by the simulator)."""
+    """Inverse of deg_per_sec_to_speed (also used by the simulator)."""
     if s == 0:
         return 0.0
-    return math.copysign(1.1 * (100 / 1.1) ** ((abs(s) - 1) / 23), s)
+    return math.copysign(_SLOW * (_FAST / _SLOW) ** ((abs(s) - 1) / 23), s)
 
 
 def _center(b):
@@ -160,6 +169,7 @@ class Tracker:
         self.pt_pos: tuple[int, int] | None = None
         self.pt_checked = 0.0
         self.at_edge = ""
+        self._ax: dict = {}          # per-axis move timing (see _axis)
         self._candidates: list = []
         self._relock = False
         self._lock = threading.Lock()
@@ -229,6 +239,7 @@ class Tracker:
         self.planned_pt = (0, 0)
         self.cmd_hist.append((getattr(self, "_now", time.time()), 0.0, 0.0))
         self.moving_x = self.moving_y = False
+        self._ax = {}
 
     # ---- main loop ----
     def _loop(self) -> None:
@@ -328,7 +339,10 @@ class Tracker:
                 self.status = "lost sight, holding"
                 return
             self.target = None
-            self.body_deg = None
+            # Keep their measured height for a while: when the same person is found again
+            # (usually seconds later) it can go straight back to the framing, with no big
+            # "zoom out to measure" cycle (seen 2026-11-13 in Tight).
+            self.lost_at = now
             self.head_hist.clear()
             if self.log:
                 self.log.event("lost")
@@ -350,6 +364,8 @@ class Tracker:
         if best:
             hits = sum(1 for c in self._candidates if c and _iou(c, best["box"]) > 0.3)
             if hits >= TUNE["confirm_frames"]:
+                if now - getattr(self, "lost_at", -1e9) > 20:
+                    self.body_deg = None   # long gap: maybe someone else now, measure again
                 self.target, self.velocity = list(best["box"]), (0.0, 0.0)
                 self.last_seen = self.locked_since = now
                 self.status = "following"
@@ -421,6 +437,23 @@ class Tracker:
             self.would = ", ".join(bits) or "hold still (person centered)"
         return pan, tilt, zdir
 
+    def _axis(self, ax: str, err: float, now: float, start: float, stop: float, urgent: float,
+              hold_start: bool = False) -> bool:
+        """Decide whether one axis (pan 'x' or tilt 'y') should be moving this frame."""
+        st = self._ax.setdefault(ax, {"moving": False, "since": 0.0, "dir": 0})
+        sign = 1 if err > 0 else -1
+        if st["moving"]:
+            in_min_move = now - st["since"] < TUNE["min_move"] and sign == st["dir"] and abs(err) > 0.01
+            keep = abs(err) > stop or in_min_move
+            if not keep:
+                st.update(moving=False, since=now)
+            return keep
+        rested = now - st["since"] >= TUNE["min_rest"]
+        go = abs(err) > start and ((rested and not hold_start) or abs(err) > urgent)
+        if go:
+            st.update(moving=True, since=now, dir=sign)
+        return go
+
     def _keep_on_stage(self, pan: int, tilt: int) -> tuple[int, int]:
         """Never steer further out past a stage edge. Moving back toward the stage is fine.
         Pan numbers grow to the right; tilt numbers grow upward."""
@@ -446,6 +479,7 @@ class Tracker:
         if now < self.paused_until:
             self.would = "waiting for preset move to finish"
             self.moving_x = self.moving_y = False
+            self._ax = {}
             return 0, 0, 0
         if (self.status == "lost sight, holding" and self.planned_pt != (0, 0)
                 and now - self.last_seen < TUNE["coast"]):
@@ -454,9 +488,17 @@ class Tracker:
             return self.planned_pt[0], self.planned_pt[1], self.zoom_dir
         if self.target is None or self.status != "following":
             self.moving_x = self.moving_y = False
+            self._ax = {}
             # A pull-out to wide keeps easing out even with nobody in the shot.
             if self.framing == "wide" and self.target is None and (self.zoom_pos or 0) > ZOOM_TOLERANCE:
                 self.would = "no one found - still easing out to wide"
+                return 0, 0, -1
+            # Lost them in a Tight or Medium shot: ease out a little to find them, like an
+            # operator would, instead of sitting on an empty close-up.
+            gone = now - self.last_seen
+            if (self.framing in ("tight", "medium") and 1.0 < gone < 8.0
+                    and (self.zoom_pos or 0) > 0.45 * ZOOM_OPTICAL_MAX):
+                self.would = "lost them - easing out to find them"
                 return 0, 0, -1
             self.would = "hold still"
             return 0, 0, 0
@@ -477,9 +519,21 @@ class Tracker:
         if self.target[1] < 0.01:                # head cut off at top right now: tilt up a bit
             ey = max(ey, 0.06)
 
-        # hysteresis dead zones
-        self.moving_x = abs(ex) > (TUNE["dead_stop_x"] if self.moving_x else TUNE["dead_start_x"])
-        self.moving_y = abs(ey) > (TUNE["dead_stop_y"] if self.moving_y else TUNE["dead_start_y"])
+        # Hysteresis dead zones, made smoother (2026-11-13: Tight looked jerky, with 0.3-0.6 s
+        # bursts about once a second). The zones grow when zoomed in, a move lasts at least
+        # min_move, and after a stop it rests min_rest before starting again unless urgent.
+        zfrac = min(1.0, max(0.0, np.log(mag) / np.log(OPTICAL_ZOOM)))
+        grow = 1 + (TUNE["tight_deadzone"] - 1) * zfrac
+        zooming = self.zoom_dir != 0 and not TUNE["tilt_while_zooming"]
+        self.moving_x = self._axis("x", ex, now, TUNE["dead_start_x"] * grow, TUNE["dead_stop_x"] * grow, 0.30)
+        # While zooming, small tilts wait, but a head heading out of the shot is always followed
+        # (2026-11-13: with no tilt at all during a Tight zoom-in, the head left the top and it lost him).
+        # The tilt still-zone may grow, but never past most of the gap above the head, or a head
+        # leaving the top of a tight shot would never trigger a tilt.
+        y_start = min(TUNE["dead_start_y"] * grow, 0.7 * head_y)
+        y_stop = min(TUNE["dead_stop_y"] * grow, 0.4 * y_start)
+        self.moving_y = self._axis("y", ey, now, y_start, y_stop,
+                                   1.4 * y_start if zooming else 0.25, hold_start=zooming)
         pan = tilt = 0
         if self.moving_x:
             v = abs(ex) * hfov / TUNE["catch_up_x"]
@@ -498,7 +552,9 @@ class Tracker:
                     self._ztxt = "zoom out to measure"
             else:
                 want_vfov = self.body_deg / TUNE[f"{self.framing}_size"]
-                z_target = min(self.cam_zoom_max(), zoom_for_magnification(VFOV_WIDE / want_vfov))
+                # Stay well inside optical zoom: the zoom reading is a little behind, and on
+                # 2026-11-13 a Tight zoom-in coasted on to 16960 (digital zoom, blurry).
+                z_target = min(self.cam_zoom_max() - 800, zoom_for_magnification(VFOV_WIDE / want_vfov))
                 diff = z_target - self.zoom_pos
                 if getattr(self, "zoom_out_only", False) and diff > 0:
                     diff = 0  # pull-out: already at least this wide, so stay
@@ -507,6 +563,8 @@ class Tracker:
                     self._ztxt = f"zoom {'in' if zdir > 0 else 'out'} to {label}"
                 elif self.zoom_dir == 0:
                     self._ztxt = f"{label} reached"
+        if zdir > 0 and self.zoom_pos is not None and self.zoom_pos >= self.cam_zoom_max() - 800:
+            zdir = 0  # hard stop: never creep toward digital zoom
         return pan, tilt, zdir
 
     def _unseen_motion(self, now: float) -> tuple[float, float]:
@@ -554,6 +612,7 @@ class Tracker:
                 "framing": self.framing, "zoom": self.zoom_pos,
                 "body_measured": self.body_deg is not None, "shadows_ignored": self.dropped,
                 "edges": self.edges, "at_edge": self.at_edge, "pan_tilt": self.pt_pos,
+                "pullout": bool(getattr(self, "zoom_out_only", False)) and self.framing == "wide",
                 "recording": bool(self.log and self.log.video_on),
                 "fps": round(self.fps, 1), "detect_ms": round(self.detect_ms, 1),
             }
