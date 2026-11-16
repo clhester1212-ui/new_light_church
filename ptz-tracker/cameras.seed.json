@@ -35,7 +35,7 @@
       "role": "presets",
       "companion": "Visca05Stage",
       "notes": "Companion page C5. Presets only. Some preset numbers have two different labels on different Companion pages.",
-      "presets": {"0": "Piano", "1": "Drums / R Guitar", "2": "Karen / L Guitar", "3": "Crowd / Drums 1", "4": "Drums 2", "5": "Drums 1&2", "6": "Stage Right", "7": "Crowd", "8": "Crowd"}
+      "presets": {"0": "Piano", "1": "Bass Guitar", "2": "Guitar", "3": "Drums", "4": "Congas", "5": "Drums 1&2", "6": "Stage Right", "7": "Crowd"}
     },
     {
       "id": "left2",
