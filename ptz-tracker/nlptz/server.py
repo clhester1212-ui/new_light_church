@@ -195,16 +195,25 @@ class Handler(BaseHTTPRequestHandler):
                     t.stop()
                 elif act == "relock":
                     t.relock()
+                elif act == "next":
+                    d = q.get("dir", "")
+                    if d not in ("left", "right"):
+                        return self._json({"error": "dir must be left or right"}, 400)
+                    if t.mode == "off":
+                        return self._json({"error": "Start tracking (or Watch only) first."}, 409)
+                    if not t.next_person(d):
+                        return self._json({"error": f"No one else to the {d}."}, 409)
+                    detail = f"next person to the {d}"
                 elif act == "frame":
                     size = q.get("size", "")
                     if size not in ("tight", "medium", "wide", "hold"):
                         return self._json({"error": "size must be tight/medium/wide/hold"}, 400)
-                    t.set_framing(None if size == "hold" else size, int(q.get("speed", 1)))
+                    t.set_framing(None if size == "hold" else size, int(q.get("speed", 2)))
                     if t.mode != "steer":   # a framing button means "track with this framing",
                         t.start("steer")    # even right after STOP (which leaves it watching)
                     detail = f"{size}, zoom speed {t.zoom_speed}"
                 elif act == "pullout":
-                    t.set_framing("wide", 0, out_only=True)  # slowest zoom speed, never zooms in
+                    t.set_framing("wide", 1, out_only=True)  # slow zoom (sped up from 0 on 2026-11-15), never zooms in
                     if t.mode != "steer":
                         t.start("steer")
                     detail = "slow pull-out to wide"
@@ -266,10 +275,13 @@ class Handler(BaseHTTPRequestHandler):
                 which = q.get("set", "")
                 if which not in db.EDGES:
                     return self._json({"error": "set must be left/right/low/high"}, 400)
-                pt = cam.pan_tilt_position()
-                if pt is None:
-                    return self._json({"error": "The camera didn't answer. Try again."}, 503)
-                value = pt[0] if which in ("left", "right") else pt[1]
+                if "value" in q:                 # a typed number (e.g. worked out from a wide picture)
+                    value = int(q["value"])
+                else:                            # where the camera points now
+                    pt = cam.pan_tilt_position()
+                    if pt is None:
+                        return self._json({"error": "The camera didn't answer. Try again."}, 503)
+                    value = pt[0] if which in ("left", "right") else pt[1]
                 edges = db.set_stage_edge(cam_row["id"], which, value)
                 detail = f"{which} stage edge set at {value}"
             t = TRACKERS.trackers.get(cam_row["id"])

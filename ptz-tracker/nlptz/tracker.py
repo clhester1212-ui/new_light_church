@@ -53,6 +53,12 @@ VFOV_WIDE = 44.0
 OPTICAL_ZOOM = 30.0       # 30x
 ZOOM_OPTICAL_MAX = 0x4000 # VISCA zoom position at 30x (beyond is digital - never go there)
 ZOOM_TOLERANCE = 250      # close enough to the framing target
+# Zoom travel in VISCA units per second at Sony zoom speed 0 and 1 (from the 2026-11-11/13 logs)
+# Camera position units per degree, measured on the SRG-300SE 2026-11-13/15 (pan from timed
+# moves vs. picture shift; tilt from where the stage lip moved in the picture).
+PAN_UNITS_PER_DEG = 51.2
+TILT_UNITS_PER_DEG = 30.0
+ZOOM_RATE = {0: 180, 1: 255, 2: 400}  # speed 2 is an estimate until measured
 
 _detector: PersonDetector | None = None
 _detector_lock = threading.Lock()
@@ -170,6 +176,7 @@ class Tracker:
         self.pt_checked = 0.0
         self.at_edge = ""
         self._ax: dict = {}          # per-axis move timing (see _axis)
+        self._glides: dict = {}      # planned pan/tilt glides during a zoom (see _glide)
         self._candidates: list = []
         self._relock = False
         self._lock = threading.Lock()
@@ -216,11 +223,36 @@ class Tracker:
         if self.log:
             self.log.event("relock")
 
+    def next_person(self, direction: str) -> bool:
+        """Switch straight to the nearest person to the left or right of the one we follow
+        (or of the center, if following no one). Keeps the measured height, since people
+        on stage are about the same size, so the framing carries on without re-measuring."""
+        with self._lock:
+            ref = _center(self.target)[0] if self.target else 0.5
+            sign = -1 if direction == "left" else 1
+            options = [p for p in self.people if p["score"] >= 0.45 and not p.get("shadow")
+                       and (_center(p["box"])[0] - ref) * sign > 0.03]
+            if not options:
+                return False
+            p = min(options, key=lambda q: abs(_center(q["box"])[0] - ref))
+            now = time.time()
+            self.target, self.velocity = list(p["box"]), (0.0, 0.0)
+            self.last_seen = self.locked_since = now
+            self.status = "following"
+            self._candidates = []
+            self.head_hist.clear()
+            self._remember_head(p["box"][1], now)
+            self._ax = {}
+        if self.log:
+            self.log.event(f"next person {direction}")
+        return True
+
     def set_framing(self, name: str | None, zoom_speed: int = 1, out_only: bool = False) -> None:
         self.framing = name if name in FRAMING_LABELS else None
         self.zoom_speed = max(0, min(7, zoom_speed))
         # Slow pull-out only ever widens the shot, never zooms in.
         self.zoom_out_only = out_only
+        self._glides = {}            # a new framing gets freshly planned glides
         if self.log:
             self.log.event(f"framing {self.framing} speed {self.zoom_speed}{' out-only' if out_only else ''}")
 
@@ -273,7 +305,8 @@ class Tracker:
                 self.zoom_pos = z
             self.zoom_checked = now
         has_edges = any(v is not None for v in self.edges.values())
-        if (self.mode == "steer" and has_edges and hasattr(self.cam, "pan_tilt_position")
+        # (also while only watching: it's needed to tell people on stage from the audience)
+        if (self.mode != "off" and has_edges and hasattr(self.cam, "pan_tilt_position")
                 and now - self.pt_checked > (0.25 if self.sent_pt != (0, 0) else 1.0)):
             pt = self.cam.pan_tilt_position()
             if pt is not None:
@@ -322,6 +355,16 @@ class Tracker:
                 # while zooming, size changes fast - be more forgiving
                 if dist < 0.9 and size < (0.9 if self.zoom_dir else 0.6) and cost < best_cost:
                     best, best_cost = p, cost
+            if best and not self._on_stage(best["box"]):
+                # They've left the stage (or it was someone in the seats): after a moment, let go.
+                since = getattr(self, "_offstage_since", None) or now
+                self._offstage_since = since
+                if now - since > 1.0:
+                    best = None
+                    self.last_seen = 0.0     # give up now and choose again
+                    self._offstage_since = None
+            else:
+                self._offstage_since = None
             if best:
                 nb = best["box"]
                 a = 0.6
@@ -355,8 +398,12 @@ class Tracker:
                 continue
             if h < TUNE["min_rel_height"] * tallest:
                 continue  # much smaller than the people on stage: a light, mic stand or monitor
+            if not self._on_stage(b):
+                continue  # someone in the seats or off to the side (2026-11-15: it picked audience members)
             cx = _center(b)[0]
-            s = -abs(cx - 0.5) * 1.5 + h * 1.2 + p["score"] * 0.3
+            # Prefer the front of the stage: lower feet in the picture = closer to the camera.
+            # (2026-11-15, full band: it picked a guitarist standing behind the singers.)
+            s = -abs(cx - 0.5) * 1.5 + h * 1.2 + p["score"] * 0.3 + b[3] * TUNE["prefer_front"]
             if s > best_score:
                 best, best_score = p, s
         # confirm: the same candidate (overlapping box) must show up steadily
@@ -406,7 +453,19 @@ class Tracker:
         standing = w > 0 and (h / w) * (9 / 16) >= 1.9
         if box[1] > 0.02 and box[3] < 0.97 and standing:
             deg = (box[3] - box[1]) * VFOV_WIDE / magnification(self.zoom_pos)
-            self.body_deg = deg if self.body_deg is None else 0.8 * self.body_deg + 0.2 * deg
+            # Legs hidden behind monitors, a mic stand or another singer only ever make someone
+            # look SHORTER, so use one of the tallest recent readings, not the average.
+            # (2026-11-15 worship: Left measured a singer at about half height, so its "Medium"
+            # zoomed to about 26x - really a tight shot - and it kept losing them.)
+            hist = getattr(self, "_body_hist", None)
+            if self.body_deg is None or hist is None:
+                hist = self._body_hist = deque()      # a fresh measurement after a reset
+            now = time.time()
+            hist.append((now, deg))
+            while hist and now - hist[0][0] > 45:
+                hist.popleft()
+            vals = sorted(d for _, d in hist)
+            self.body_deg = vals[min(len(vals) - 1, int(len(vals) * 0.85))]
 
     def _plan_move(self, now: float) -> tuple[int, int, int]:
         """Work out pan/tilt speeds and zoom direction. Returns (pan, tilt, zoom_dir)."""
@@ -453,6 +512,43 @@ class Tracker:
         if go:
             st.update(moving=True, since=now, dir=sign)
         return go
+
+    def _glide(self, ax: str, deg: float, frac: float, t_left: float, now: float, top: int) -> int:
+        """A single smooth pan or tilt move during a zoom: returns the Sony speed to use now."""
+        g = self._glides.get(ax)
+        if g and now < g["until"]:
+            if np.sign(deg) == g["dir"] or abs(frac) < 0.10:
+                return g["speed"]          # keep gliding at the planned speed
+        if abs(frac) <= 0.07:              # close enough: nothing to fix
+            self._glides.pop(ax, None)
+            return 0
+        s = deg_per_sec_to_speed(abs(deg) / t_left, top)
+        v = speed_to_deg_per_sec(s)
+        speed = int(np.sign(deg)) * s
+        self._glides[ax] = {"speed": speed, "dir": np.sign(deg), "until": now + abs(deg) / v}
+        return speed
+
+    def _on_stage(self, box) -> bool:
+        """Is this person inside the stage edges? Uses where the camera points and the zoom to
+        turn the box into camera pan/tilt numbers. Their head must be above the bottom edge
+        (the stage lip: seated audience heads are below it) and their middle between the side
+        edges. True when edges aren't set or the position isn't known yet."""
+        e = self.edges
+        if self.pt_pos is None or self.zoom_pos is None or all(v is None for v in e.values()):
+            return True
+        mag = magnification(self.zoom_pos)
+        hfov, vfov = HFOV_WIDE / mag, VFOV_WIDE / mag
+        p0, t0 = self.pt_pos
+        pan_mid = p0 + (_center(box)[0] - 0.5) * hfov * PAN_UNITS_PER_DEG
+        head_tilt = t0 + (0.5 - box[1]) * vfov * TILT_UNITS_PER_DEG
+        side = 3 * PAN_UNITS_PER_DEG     # a little leeway at the sides
+        if e["left"] is not None and pan_mid < e["left"] - side:
+            return False
+        if e["right"] is not None and pan_mid > e["right"] + side:
+            return False
+        if e["low"] is not None and head_tilt < e["low"]:
+            return False
+        return True
 
     def _keep_on_stage(self, pan: int, tilt: int) -> tuple[int, int]:
         """Never steer further out past a stage edge. Moving back toward the stage is fine.
@@ -519,31 +615,8 @@ class Tracker:
         if self.target[1] < 0.01:                # head cut off at top right now: tilt up a bit
             ey = max(ey, 0.06)
 
-        # Hysteresis dead zones, made smoother (2026-11-13: Tight looked jerky, with 0.3-0.6 s
-        # bursts about once a second). The zones grow when zoomed in, a move lasts at least
-        # min_move, and after a stop it rests min_rest before starting again unless urgent.
-        zfrac = min(1.0, max(0.0, np.log(mag) / np.log(OPTICAL_ZOOM)))
-        grow = 1 + (TUNE["tight_deadzone"] - 1) * zfrac
-        zooming = self.zoom_dir != 0 and not TUNE["tilt_while_zooming"]
-        self.moving_x = self._axis("x", ex, now, TUNE["dead_start_x"] * grow, TUNE["dead_stop_x"] * grow, 0.30)
-        # While zooming, small tilts wait, but a head heading out of the shot is always followed
-        # (2026-11-13: with no tilt at all during a Tight zoom-in, the head left the top and it lost him).
-        # The tilt still-zone may grow, but never past most of the gap above the head, or a head
-        # leaving the top of a tight shot would never trigger a tilt.
-        y_start = min(TUNE["dead_start_y"] * grow, 0.7 * head_y)
-        y_stop = min(TUNE["dead_stop_y"] * grow, 0.4 * y_start)
-        self.moving_y = self._axis("y", ey, now, y_start, y_stop,
-                                   1.4 * y_start if zooming else 0.25, hold_start=zooming)
-        pan = tilt = 0
-        if self.moving_x:
-            v = abs(ex) * hfov / TUNE["catch_up_x"]
-            pan = int(np.sign(ex)) * deg_per_sec_to_speed(v, TUNE["max_pan_speed"])
-        if self.moving_y:
-            v = abs(ey) * vfov / TUNE["catch_up_y"]
-            tilt = int(np.sign(ey)) * deg_per_sec_to_speed(v, TUNE["max_tilt_speed"])
-
-        # framing -> zoom direction
-        zdir = 0
+        # framing -> zoom direction (worked out first: a zoom changes how pan/tilt are planned)
+        zdir, z_target = 0, None
         if self.framing in FRAMING_LABELS and self.zoom_pos is not None:
             label = FRAMING_LABELS[self.framing].lower()
             if self.body_deg is None:
@@ -555,6 +628,9 @@ class Tracker:
                 # Stay well inside optical zoom: the zoom reading is a little behind, and on
                 # 2026-11-13 a Tight zoom-in coasted on to 16960 (digital zoom, blurry).
                 z_target = min(self.cam_zoom_max() - 800, zoom_for_magnification(VFOV_WIDE / want_vfov))
+                ceiling = TUNE.values.get(f"{self.framing}_max_zoom") if hasattr(TUNE, "values") else None
+                if ceiling:
+                    z_target = min(z_target, int(ceiling))
                 diff = z_target - self.zoom_pos
                 if getattr(self, "zoom_out_only", False) and diff > 0:
                     diff = 0  # pull-out: already at least this wide, so stay
@@ -565,6 +641,59 @@ class Tracker:
                     self._ztxt = f"{label} reached"
         if zdir > 0 and self.zoom_pos is not None and self.zoom_pos >= self.cam_zoom_max() - 800:
             zdir = 0  # hard stop: never creep toward digital zoom
+
+        pan = tilt = 0
+        if zdir:
+            # ---- Coordinated move (2026-11-15: "zoom out a little, then step and center it
+            # back up" - make it one fluid motion). While zooming, aim for where the person
+            # should sit in the FINAL shot and spread the pan/tilt over the time the zoom
+            # still needs, so pan, tilt and zoom glide together and finish together.
+            rate = ZOOM_RATE.get(self.zoom_speed, 255 * (self.zoom_speed + 1) / 2)
+            deg_x = ex * hfov                                          # already allows for unseen moves
+            if z_target is None:
+                # Zooming out only to measure them (or a lost-person ease-out): there's no final
+                # shot to aim for, so just keep them centered in the current picture, head a bit
+                # high. (2026-11-15: aiming for a full-wide head position here tilted it to the floor.)
+                hfov_e, vfov_e, t_left = hfov, vfov, 2.0
+                deg_y = (0.25 - top) * vfov - (head_y - top - ey) * vfov
+            else:
+                t_left = min(8.0, max(1.2, abs(z_target - self.zoom_pos) / rate))
+                mag_end = magnification(z_target)
+                hfov_e, vfov_e = HFOV_WIDE / mag_end, VFOV_WIDE / mag_end
+                deg_y = ey * vfov + (head_y - 0.5) * (vfov_e - vfov)    # head where it belongs at the end
+            # errors as a part of the final picture: small ones are left alone
+            # One planned glide per axis (2026-11-15: reacting frame by frame during a zoom
+            # still blinked pan on and off, because the slowest Sony speed is faster than the
+            # small drift needs). At the start, work out the whole correction, pick the speed
+            # that covers it within the zoom's remaining time, and run it for exactly that
+            # long. Only re-plan if they move enough to need a new glide.
+            pan = self._glide("x", deg_x, deg_x / hfov_e, t_left, now, TUNE["max_pan_speed"])
+            tilt = self._glide("y", deg_y, deg_y / vfov_e, t_left, now, TUNE["max_tilt_speed"])
+            self.moving_x, self.moving_y = pan != 0, tilt != 0
+            return pan, tilt, zdir
+
+        self._glides = {}
+        # Hysteresis dead zones, made smoother (2026-11-13: Tight looked jerky, with 0.3-0.6 s
+        # bursts about once a second). The zones grow when zoomed in, a move lasts at least
+        # min_move, and after a stop it rests min_rest before starting again unless urgent.
+        zfrac = min(1.0, max(0.0, np.log(mag) / np.log(OPTICAL_ZOOM)))
+        grow = 1 + (TUNE["tight_deadzone"] - 1) * zfrac
+        self.moving_x = self._axis("x", ex, now, TUNE["dead_start_x"] * grow, TUNE["dead_stop_x"] * grow, 0.30)
+        # The tilt still-zone may grow, but never past most of the gap above the head, or a head
+        # leaving the top of a tight shot would never trigger a tilt.
+        # (only when the head is heading UP out of the shot; below the head there's lots of room,
+        # and capping both ways made Left bob with a dancing singer on 2026-11-15)
+        y_start = TUNE["dead_start_y"] * grow
+        if ey > 0:
+            y_start = min(y_start, 0.7 * head_y)
+        y_stop = min(TUNE["dead_stop_y"] * grow, 0.4 * y_start)
+        self.moving_y = self._axis("y", ey, now, y_start, y_stop, 0.25)
+        if self.moving_x:
+            v = abs(ex) * hfov / TUNE["catch_up_x"]
+            pan = int(np.sign(ex)) * deg_per_sec_to_speed(v, TUNE["max_pan_speed"])
+        if self.moving_y:
+            v = abs(ey) * vfov / TUNE["catch_up_y"]
+            tilt = int(np.sign(ey)) * deg_per_sec_to_speed(v, TUNE["max_tilt_speed"])
         return pan, tilt, zdir
 
     def _unseen_motion(self, now: float) -> tuple[float, float]:
