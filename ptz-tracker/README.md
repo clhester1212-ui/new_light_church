@@ -4,13 +4,14 @@ Camera list, live status and test controls for the New Light Church PTZ cameras.
 
 ## Start it
 
-Double-click **`start-ptz-tracker.bat`** in this folder, or run:
+On the Stream Deck PC it starts by itself: when Windows logs in, the **New Light PTZ Tracker** scheduled task runs it in the background with no window. If it stops or crashes, it restarts within about 10 seconds. To open the dashboard, double-click **PTZ Tracker** on the desktop (green camera icon). If the tracker isn't running, the button starts it first, then opens **http://localhost:8890**.
 
-```
-python ptz-tracker/run.py
-```
+When it starts, moves are locked and no camera is tracking, so starting by itself never moves a camera.
 
-Then open **http://localhost:8890** on the Stream Deck PC.
+- Set it up on another PC (once): `powershell -ExecutionPolicy Bypass -File ptz-tracker\tools\install_autostart.ps1`
+- Its messages go to `data/logs/tracker.log`.
+- To turn the auto-start off, disable the task in Task Scheduler.
+- By hand, for testing: `python ptz-tracker/run.py`, or double-click `start-ptz-tracker.bat`. That shows a window, and closing it stops the tracker.
 
 ## What you'll see
 
