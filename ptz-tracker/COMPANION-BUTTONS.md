@@ -17,6 +17,7 @@ Use the same buttons for the Right camera with `right` in place of `left`.
 | L MED | `/api/track/left/frame?size=medium&from=deck` |
 | L WIDE | `/api/track/left/frame?size=wide&from=deck` |
 | L PULL OUT | `/api/track/left/pullout?from=deck` |
+| L LONG PULL | `/api/track/left/longpull?from=deck` (tight → all the way out, ~20 s at speed 3; tuning "Long pull-out: zoom speed") |
 | L HOLD ZOOM | `/api/track/left/frame?size=hold&from=deck` |
 | L PREACH + TRACK | `/api/track/left/preset/13?from=deck` |
 | L STOP | `/api/cameras/left/stop` (always works) |

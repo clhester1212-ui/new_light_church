@@ -146,6 +146,7 @@ function trackButtons(c) {
     { label: 'Medium', url: `${t}/frame?size=medium`, mv: 1, key: 'medium' },
     { label: 'Wide', url: `${t}/frame?size=wide`, mv: 1, key: 'wide' },
     { label: 'Slow pull-out', url: `${t}/pullout`, mv: 1, key: 'pullout' },
+    { label: 'Long pull-out', url: `${t}/longpull`, mv: 1, key: 'longpull' },
     { label: 'Hold zoom', url: `${t}/frame?size=hold`, mv: 1, key: 'hold' },
     preach ? { label: `${preach.name} + track`, url: `${t}/preset/${preach.number}`, mv: 1 } : null,
     { label: 'STOP', url: `/api/cameras/${c.id}/stop`, cls: 'stop', stop: 1 },
@@ -247,7 +248,7 @@ async function refreshTrack() {
     if (!el) continue;
     // light up the button for what it's doing now
     const active = new Set([s.mode]);
-    if (s.mode !== 'off' && s.framing) active.add(s.pullout ? 'pullout' : s.framing);
+    if (s.mode !== 'off' && s.framing) active.add(s.longpull ? 'longpull' : s.pullout ? 'pullout' : s.framing);
     document.querySelectorAll(`[data-key^="${c.id}:"]`).forEach(b => b.classList.toggle('on', active.has(b.dataset.key.split(':')[1]) && b.dataset.key !== `${c.id}:steer`));
     const steerBtn = document.querySelector(`[data-key="${c.id}:steer"]`);
     if (steerBtn) steerBtn.classList.toggle('on', s.mode === 'steer');

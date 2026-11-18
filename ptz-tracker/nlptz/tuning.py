@@ -69,12 +69,20 @@ SPEC: dict[str, tuple] = {
     "video_delay": (0.5, 0.0, 1.5, 0.05, "Timing", "Video delay to allow for (seconds)",
                     "The camera's network video arrives a little late. The tracker allows for the moves it already made that the video doesn't show yet, so it doesn't overshoot. Use 'Measure video delay' to find the real number."),
     # ---- framing ----
-    "tight_size": (3.4, 2.0, 6.0, 0.1, "Framing", "Tight: zoom (body heights)",
-                   "Bigger = tighter. 3.4 shows about head and shoulders."),
+    # 2026-11-16: the user wants nothing closer than "a half-chest headshot" - never just a face.
+    # Tight used to be 3.4 (head and shoulders) and reached zoom 15600 on 11-15.
+    "tight_size": (2.4, 1.8, 3.0, 0.1, "Framing", "Tight: zoom (body heights)",
+                   "Bigger = tighter. 2.4 shows about head to mid-chest - the closest the church wants."),
+    "closest_zoom": (14000, 9000, 15500, 100, "Framing", "Never zoom past (any button)",
+                     "Hard limit for every framing, Tight included, so a short-measuring person can never become a face close-up. On 2026-11-16 the user looked at 11 shots from 11-15: everything up to 14500 was fine, 15550+ was too close. 14000 leaves room for the zoom coasting about 500 past where it is stopped."),
+    "tight_max_zoom": (14000, 9000, 15500, 100, "Framing", "Tight: never zoom past",
+                       "Camera zoom number Tight never goes beyond (also held by 'Never zoom past')."),
     "medium_max_zoom": (13000, 6000, 15500, 100, "Framing", "Medium: never zoom past",
                         "Camera zoom number Medium never goes beyond. People behind keyboards, guitars and monitors look shorter than they are, so without this Medium can end up a head close-up. 13000 looked waist-up from Left and Right on 2026-11-15."),
     "wide_max_zoom": (10500, 4000, 15000, 100, "Framing", "Wide: never zoom past",
                       "Camera zoom number Wide (whole body) never goes beyond, for the same reason."),
+    "long_pull_speed": (3, 1, 5, 1, "Framing", "Long pull-out: zoom speed",
+                        "How fast Long pull-out zooms from a tight shot all the way out. 3 takes about 20-25 s from Tight (measured on Left 2026-11-17); 4 about 12-15 s; 2 about 35 s."),
     "medium_size": (1.8, 1.2, 3.0, 0.1, "Framing", "Medium: zoom (body heights)",
                     "Bigger = tighter. 1.8 shows about waist up."),
     "wide_size": (0.8, 0.4, 1.2, 0.05, "Framing", "Wide: zoom (body heights)",

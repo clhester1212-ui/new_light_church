@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.request
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -46,6 +47,19 @@ class State:
         cls.deck_enabled = on
         DECK_FILE.parent.mkdir(parents=True, exist_ok=True)
         DECK_FILE.write_text(json.dumps({"enabled": on}))
+        cls.tell_companion_deck()
+
+    @classmethod
+    def tell_companion_deck(cls) -> None:
+        """Companion custom variable ptz_deck = on/off, so the Setup page shows the switch."""
+        url = "http://127.0.0.1:8888/api/custom-variable/ptz_deck/value?value=" + ("on" if cls.deck_enabled else "off")
+
+        def send() -> None:
+            try:
+                urllib.request.urlopen(urllib.request.Request(url, method="POST"), timeout=2).close()
+            except Exception:
+                pass
+        threading.Thread(target=send, daemon=True).start()
 
 
 def poll_status_forever(interval: float = 5.0) -> None:
@@ -184,10 +198,26 @@ class Handler(BaseHTTPRequestHandler):
             t = TRACKERS.get(cam_row["id"], cam_row["rtsp_url"], cam_row["ip"])
             act = parts[3]
             detail = ""
-            if act in ("steer", "frame", "pullout", "preset", "measure-delay") and not State.may_move(q):
+            if act in ("steer", "frame", "pullout", "longpull", "preset", "measure-delay") and not State.may_move(q):
                 return self._json({"error": "Camera moves are locked. Unlock them on the dashboard first."}, 423)
             try:
-                if act == "watch":
+                if act == "manual":
+                    # A Stream Deck preset/arrow/zoom button is about to move this camera by hand:
+                    # stop steering so tracking doesn't fight it (keeps watching). Never moves anything.
+                    if t.mode == "steer":
+                        t.start("watch")
+                        detail = "manual move - steering paused"
+                elif act == "toggle":
+                    # Stream Deck "Track" button: tracking on (steer) <-> off
+                    if t.mode == "steer":
+                        t.stop()
+                        detail = "toggled off"
+                    else:
+                        if not State.may_move(q):
+                            return self._json({"error": "Camera moves are locked. Unlock them on the dashboard first."}, 423)
+                        t.start("steer")
+                        detail = "toggled on"
+                elif act == "watch":
                     t.start("watch")
                 elif act == "steer":
                     t.start("steer")
@@ -217,6 +247,13 @@ class Handler(BaseHTTPRequestHandler):
                     if t.mode != "steer":
                         t.start("steer")
                     detail = "slow pull-out to wide"
+                elif act == "longpull":
+                    # Long pull-out: from wherever it is (usually Tight) all the way out, slowly,
+                    # staying centered on the person. Speed is a tuning setting (default 3).
+                    t.set_framing("full", int(TUNE["long_pull_speed"]), out_only=True)
+                    if t.mode != "steer":
+                        t.start("steer")
+                    detail = f"long pull-out to full wide, zoom speed {t.zoom_speed}"
                 elif act == "record":
                     on = q.get("on", "1") == "1"
                     if on and t.mode == "off":
@@ -342,10 +379,30 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"ok": "NOT ACCEPTED" not in detail, "detail": detail})
 
 
+def companion_resync_forever(interval: float = 20.0) -> None:
+    """Re-send the Stream Deck switch and each tracking camera's mode to Companion every 20 s,
+    so the deck shows the truth even if Companion started after this app (or restarted)."""
+    while True:
+        State.tell_companion_deck()
+        for cam_row in db.cameras():
+            if cam_row["role"] == "track":
+                t = TRACKERS.trackers.get(cam_row["id"])
+                if t:
+                    t._tell_companion()
+                else:
+                    url = f"http://127.0.0.1:8888/api/custom-variable/ptz_{cam_row['id']}_mode/value?value=off"
+                    try:
+                        urllib.request.urlopen(urllib.request.Request(url, method="POST"), timeout=2).close()
+                    except Exception:
+                        pass
+        time.sleep(interval)
+
+
 def serve(host: str = "127.0.0.1", port: int = 8890) -> None:
     db.con()
     transport()
     threading.Thread(target=poll_status_forever, daemon=True).start()
+    threading.Thread(target=companion_resync_forever, daemon=True).start()
     httpd = ThreadingHTTPServer((host, port), Handler)
     print(f"New Light PTZ Tracker running at http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}")
     db.log_event(None, "app started")

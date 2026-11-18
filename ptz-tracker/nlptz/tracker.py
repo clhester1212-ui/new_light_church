@@ -32,6 +32,8 @@ import io
 import math
 import threading
 import time
+import urllib.parse
+import urllib.request
 from collections import deque
 
 import numpy as np
@@ -44,8 +46,9 @@ from .visca import ViscaCamera
 
 STALE_VIDEO = 1.0         # stop moving if no fresh frame for this long
 
-FRAMING_LABELS = {"wide": "Wide (full body)", "medium": "Medium (waist up)", "tight": "Tight (head and shoulders)"}
-FRAMING_HEAD_Y = {"wide": 0.10, "medium": 0.12, "tight": 0.14}
+FRAMING_LABELS = {"wide": "Wide (full body)", "medium": "Medium (waist up)", "tight": "Tight (head to mid-chest)",
+                  "full": "Full wide (camera all the way out)"}
+FRAMING_HEAD_Y = {"wide": 0.10, "medium": 0.12, "tight": 0.14, "full": 0.30}
 
 # ---- Sony SRG-300SE optics (approximate) ----
 HFOV_WIDE = 71.0          # degrees, fully zoomed out
@@ -58,7 +61,8 @@ ZOOM_TOLERANCE = 250      # close enough to the framing target
 # moves vs. picture shift; tilt from where the stage lip moved in the picture).
 PAN_UNITS_PER_DEG = 51.2
 TILT_UNITS_PER_DEG = 30.0
-ZOOM_RATE = {0: 180, 1: 255, 2: 400}  # speed 2 is an estimate until measured
+# zoom units per second. 3-5 measured on Left 2026-11-17 (zooming out from 12000); speed 2 is an estimate.
+ZOOM_RATE = {0: 180, 1: 255, 2: 400, 3: 560, 4: 1030, 5: 1800}
 
 _detector: PersonDetector | None = None
 _detector_lock = threading.Lock()
@@ -184,8 +188,23 @@ class Tracker:
         self.log = SessionLog(cam_id) if log else None
 
     # ---- control ----
+    def _tell_companion(self) -> None:
+        """Let Companion show this camera's mode (custom variable ptz_<cam>_mode = steer/watch/off),
+        so the Stream Deck Track buttons light up. Best effort: never slows or breaks tracking."""
+        url = (f"http://127.0.0.1:8888/api/custom-variable/ptz_{self.cam_id}_mode/value?"
+               + urllib.parse.urlencode({"value": self.mode}))
+
+        def send() -> None:
+            try:
+                urllib.request.urlopen(urllib.request.Request(url, method="POST"), timeout=2).close()
+            except Exception:
+                pass
+        threading.Thread(target=send, daemon=True).start()
+
     def start(self, mode: str = "watch") -> None:
         prev, self.mode = self.mode, mode   # change mode first so the loop stops steering
+        if prev != mode:
+            self._tell_companion()
         if prev == "steer" and mode != "steer":
             time.sleep(0.15)
             self._halt()
@@ -202,6 +221,7 @@ class Tracker:
     def stop(self) -> None:
         was_steering = self.mode == "steer"
         self.mode = "off"
+        self._tell_companion()
         if was_steering:
             time.sleep(0.15)
             self._halt()
@@ -586,7 +606,7 @@ class Tracker:
             self.moving_x = self.moving_y = False
             self._ax = {}
             # A pull-out to wide keeps easing out even with nobody in the shot.
-            if self.framing == "wide" and self.target is None and (self.zoom_pos or 0) > ZOOM_TOLERANCE:
+            if self.framing in ("wide", "full") and self.target is None and (self.zoom_pos or 0) > ZOOM_TOLERANCE:
                 self.would = "no one found - still easing out to wide"
                 return 0, 0, -1
             # Lost them in a Tight or Medium shot: ease out a little to find them, like an
@@ -619,7 +639,16 @@ class Tracker:
         zdir, z_target = 0, None
         if self.framing in FRAMING_LABELS and self.zoom_pos is not None:
             label = FRAMING_LABELS[self.framing].lower()
-            if self.body_deg is None:
+            if self.framing == "full":
+                # Long pull-out (2026-11-17): tight -> camera all the way out, slowly, staying
+                # centered on the person. No body measurement needed: the target is zoom 0.
+                z_target = 0
+                if self.zoom_pos > ZOOM_TOLERANCE:
+                    zdir = -1
+                    self._ztxt = f"zoom out to {label}"
+                elif self.zoom_dir == 0:
+                    self._ztxt = f"{label} reached"
+            elif self.body_deg is None:
                 if self.zoom_pos > 0:
                     zdir = -1  # need to see the whole body once to measure them
                     self._ztxt = "zoom out to measure"
@@ -714,7 +743,11 @@ class Tracker:
         return dp, dt_
 
     def cam_zoom_max(self) -> int:
-        return getattr(self.cam, "zoom_max", ZOOM_OPTICAL_MAX)
+        """Furthest the tracker may zoom in, plus the 800 safety margin the callers subtract.
+        Capped by the 'closest_zoom' tuning (2026-11-16: never closer than head to mid-chest)."""
+        cam_max = getattr(self.cam, "zoom_max", ZOOM_OPTICAL_MAX)
+        closest = TUNE.values.get("closest_zoom") if hasattr(TUNE, "values") else None
+        return min(cam_max, int(closest) + 800) if closest else cam_max
 
     def _apply(self, pan: int, tilt: int, zdir: int) -> None:
         """Send only what changed, so the camera gets a calm stream of commands."""
@@ -742,6 +775,7 @@ class Tracker:
                 "body_measured": self.body_deg is not None, "shadows_ignored": self.dropped,
                 "edges": self.edges, "at_edge": self.at_edge, "pan_tilt": self.pt_pos,
                 "pullout": bool(getattr(self, "zoom_out_only", False)) and self.framing == "wide",
+                "longpull": self.framing == "full",
                 "recording": bool(self.log and self.log.video_on),
                 "fps": round(self.fps, 1), "detect_ms": round(self.detect_ms, 1),
             }
