@@ -327,7 +327,12 @@ class Handler(BaseHTTPRequestHandler):
             db.log_event(cam_row["id"], "stage edge", detail)
             return self._json({"ok": True, "edges": edges, "detail": detail})
 
-        if not State.may_move(q):
+        # Stream Deck hand controls (presets, arrows, zoom, home, exposure) always work from the
+        # deck: since 2026-11-18 Companion sends ALL camera commands through this app, because two
+        # programs numbering VISCA messages separately made the cameras drop Companion's commands.
+        # The "Deck moves cameras" switch still guards auto-tracking moves (the /api/track calls).
+        deck_hand = q.get("from") == "deck" and action in ("move", "zoomgo", "preset", "home", "raw")
+        if not (State.may_move(q) or deck_hand):
             return self._json({"error": "Camera moves are locked. Unlock them on the dashboard first."}, 423)
 
         # A manual move takes over from tracking.
@@ -371,6 +376,37 @@ class Handler(BaseHTTPRequestHandler):
             elif action == "home":
                 cam.home()
                 detail = ""
+            elif action == "move":
+                # Stream Deck arrow: drive until dir=stop (button release).
+                d = q.get("dir", "")
+                speed = int(q.get("speed", 8))
+                if d == "stop":
+                    cam.pan_tilt(0, 0)
+                elif d in NUDGE:
+                    px, ty = NUDGE[d]
+                    cam.pan_tilt(px * speed, ty * speed)
+                else:
+                    return self._json({"error": "dir must be left/right/up/down/stop"}, 400)
+                detail = f"move {d} speed {speed}"
+            elif action == "zoomgo":
+                # Stream Deck zoom button: zoom until dir=stop (button release).
+                d = q.get("dir", "")
+                speed = int(q.get("speed", 2))
+                if d == "stop":
+                    cam.zoom(0)
+                elif d in ("in", "out"):
+                    cam.zoom_drive(1 if d == "in" else -1, speed)
+                else:
+                    return self._json({"error": "dir must be in/out/stop"}, 400)
+                detail = f"zoom {d} speed {speed}"
+            elif action == "raw":
+                # A plain VISCA command (exposure buttons etc.), e.g. hex=810104390AFF
+                h = q.get("hex", "").upper()
+                if not (8 <= len(h) <= 32 and len(h) % 2 == 0 and h.startswith("8101") and h.endswith("FF")
+                        and all(ch in "0123456789ABCDEF" for ch in h)):
+                    return self._json({"error": "hex must be a VISCA command like 810104390AFF"}, 400)
+                ok = cam._cmd(h)
+                detail = f"raw {h}" + ("" if ok else " NOT ACCEPTED")
             else:
                 return self._json({"error": "unknown action"}, 404)
         except ValueError:
