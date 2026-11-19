@@ -462,10 +462,11 @@ class Tracker:
 
     def _measure_body(self, box) -> None:
         """If the whole body is in the picture, remember how tall the person is in degrees."""
-        # While zooming fast the zoom reading is too stale to trust. A slow zoom (speed 0-2, e.g.
+        # While zooming fast the zoom reading is too stale to trust. A slow zoom (speed 0-3, e.g.
         # "zoom out to measure" during a pull-out) is close enough, and must be allowed or a
-        # pull-out that's waiting to measure would never stop.
-        if self.zoom_pos is None or (self.zoom_dir and self.zoom_speed > 2):
+        # pull-out that's waiting to measure would never stop. (Was 0-2 until 2026-11-18, when
+        # the framing zoom went from speed 2 to 3 at the user's request.)
+        if self.zoom_pos is None or (self.zoom_dir and self.zoom_speed > 3):
             return
         # Only a standing person counts: someone sitting, or with legs hidden behind a table or
         # pulpit, makes a squat box and would be taken as a short person (wrong zoom).

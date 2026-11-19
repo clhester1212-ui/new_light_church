@@ -238,12 +238,13 @@ class Handler(BaseHTTPRequestHandler):
                     size = q.get("size", "")
                     if size not in ("tight", "medium", "wide", "hold"):
                         return self._json({"error": "size must be tight/medium/wide/hold"}, 400)
-                    t.set_framing(None if size == "hold" else size, int(q.get("speed", 2)))
+                    # zoom speed 3 since 2026-11-18 (user: "speed the zooms up"; was 2)
+                    t.set_framing(None if size == "hold" else size, int(q.get("speed", 3)))
                     if t.mode != "steer":   # a framing button means "track with this framing",
                         t.start("steer")    # even right after STOP (which leaves it watching)
                     detail = f"{size}, zoom speed {t.zoom_speed}"
                 elif act == "pullout":
-                    t.set_framing("wide", 1, out_only=True)  # slow zoom (sped up from 0 on 2026-11-15), never zooms in
+                    t.set_framing("wide", 2, out_only=True)  # slow zoom (0 -> 1 on 2026-11-15, 1 -> 2 on 2026-11-18), never zooms in
                     if t.mode != "steer":
                         t.start("steer")
                     detail = "slow pull-out to wide"
