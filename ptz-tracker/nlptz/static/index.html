@@ -82,6 +82,26 @@
   .trow input[type=range] { width:100%; } .trow .val { font-variant-numeric:tabular-nums; text-align:right; }
   .trow .changed { color:var(--warn); font-weight:600; }
   .help { color:var(--muted); font-size:12px; grid-column:1 / -1; margin-top:-2px; }
+  /* Big (ATEM 2 M/E Constellation HD) inputs */
+  section.bigsec { padding:0 16px 16px; }
+  .bigbox { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; display:grid; gap:10px; }
+  .bighead { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; justify-content:space-between; }
+  .bighead h2 { margin:0; font-size:18px; display:flex; align-items:center; gap:8px; }
+  .inputs { display:grid; gap:10px; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); }
+  .inp { border:2px solid var(--line); border-radius:12px; overflow:hidden; background:var(--card); display:grid; }
+  .inp.pgm { border-color:#d92d20; } .inp.pvw { border-color:#16a34a; }
+  .inp .pic { font-size:12px; position:relative; }
+  .inp .num { position:absolute; top:6px; left:6px; background:rgba(0,0,0,.7); color:#fff; font-size:12px; font-weight:700; padding:2px 7px; border-radius:6px; }
+  .inp .tally { position:absolute; top:6px; right:6px; font-size:11px; font-weight:800; padding:2px 7px; border-radius:6px; color:#fff; }
+  .inp .tally.pgm { background:#d92d20; } .inp .tally.pvw { background:#16a34a; }
+  .inp .meta { padding:8px; display:grid; gap:6px; }
+  .inp .pic { padding:0 10px; text-align:center; } .inp .pic:has(img) { padding:0; }
+  .inp .nm { display:flex; gap:6px; } .inp .nm input { min-width:0; width:0; flex:1; font:inherit; font-size:14px; font-weight:650; padding:4px 7px; border-radius:7px; border:1px solid var(--line); background:var(--tile); color:var(--ink); }
+  .inp .nm input.short { flex:0 0 58px; font-weight:500; text-transform:uppercase; }
+  .inp .nm input.dirty { border-color:var(--warn); }
+  .inp select { width:100%; }
+  .inp.empty .pic { color:#777; }
+  .camhead .biglink { color:var(--muted); font-size:12px; font-weight:600; }
   #events { font-size:13px; color:var(--muted); margin:8px 0 0; padding:0; list-style:none; max-height:260px; overflow:auto; }
   #events li { padding:2px 0; }
   #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#222; color:#fff; padding:9px 15px; border-radius:9px; font-size:14px; display:none; z-index:5; max-width:calc(100% - 32px); }
@@ -100,6 +120,19 @@
 </header>
 
 <main class="stage" id="stage"></main>
+
+<section class="bigsec">
+  <div class="bigbox">
+    <div class="bighead">
+      <h2><span class="dot" id="bigDot"></span>Big inputs</h2>
+      <span class="sub" id="bigStatus">Checking Big…</span>
+      <button class="hbtn" id="bigStills" title="Cuts Big's M/E 1 program through every input to take a picture of each. Setup only.">Take input pictures</button>
+    </div>
+    <div class="sub">Pictures are stills, not live: Big can't send live video over the network. Red border = on program, green = on preview (M/E 1).
+      Type a name and press Enter to rename that input on Big. Use "This is…" to say which app camera is plugged in there.</div>
+    <div class="inputs" id="bigInputs"></div>
+  </div>
+</section>
 
 <section class="more">
   <details class="box" id="setupBox"><summary>Setup and fine control: nudge, manual presets, stage edges, testing</summary>
@@ -212,7 +245,7 @@ function build(list) {
   $('#stage').innerHTML = shown.map(c => `
     <div class="col">
       <div class="cam" id="cam-${c.id}">
-        <div class="camhead"><h2><span class="dot" id="dot-${c.id}"></span>${c.name}</h2>
+        <div class="camhead"><h2><span class="dot" id="dot-${c.id}"></span>${c.name} <span class="biglink" id="biglink-${c.id}"></span></h2>
           <span class="badge" id="badge-${c.id}">${c.role === 'track' ? 'Not tracking' : 'Presets'}</span></div>
         <div class="pic" id="pic-${c.id}">Loading picture…</div>
         <div class="status" id="ts-${c.id}">${c.role === 'track' ? 'Not tracking' : (c.model || '')}</div>
@@ -329,6 +362,81 @@ async function loadTuning() {
     };
   });
 }
+// ---- Big (ATEM 2 M/E Constellation HD) ----
+const esc = s => String(s ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+let bigBuilt = '', bigPicStamp = 0;
+async function refreshBig() {
+  let d;
+  try { d = await (await fetch('/api/big')).json(); } catch { return; }
+  const ok = !d.error;
+  $('#bigDot').className = 'dot ' + (ok ? 'on' : 'off');
+  const st = d.stills;
+  $('#bigStatus').textContent = !ok ? `Not answering at ${d.ip}: ${d.error}` :
+    `${d.product} · ${d.ip} · ${d.format}` + (st ? ` · pictures from ${new Date(st.taken * 1000).toLocaleString()}` : ' · no pictures yet');
+  $('#bigStills').disabled = !ok || d.stills_running;
+  if (d.stills_running) $('#bigStills').textContent = 'Taking pictures…';
+  else $('#bigStills').textContent = 'Take input pictures';
+  // which app camera each input is
+  const linkOf = {}; for (const [cam, n] of Object.entries(d.links || {})) linkOf[n] = cam;
+  for (const c of cams) { const el = $('#biglink-' + c.id); if (el) el.textContent = d.links && d.links[c.id] ? `· Big input ${d.links[c.id]}` : ''; }
+  if (!ok) return;
+  const me = d.me[0] || {};
+  const key = JSON.stringify([d.inputs, d.links, st && st.taken, cams.map(c => c.id)]);
+  if (key !== bigBuilt) {
+    // keep any name someone is typing
+    const typing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#bigInputs');
+    if (typing) return;
+    bigBuilt = key; bigPicStamp = st ? st.taken : 0;
+    const camOpts = cams.filter(c => c.role !== 'retired');
+    $('#bigInputs').innerHTML = d.inputs.map(i => {
+      const s = st && st.inputs[i.id];
+      const pic = s && s.file ? `<img src="/api/big/still/${i.id}.jpg?t=${bigPicStamp}" alt="">` : '';
+      const label = !st ? 'No picture yet' : !s ? '' : s.picture ? '' : 'Black (no signal or wrong format)';
+      return `<div class="inp ${s && !s.picture ? 'empty' : ''}" id="inp-${i.id}">
+        <div class="pic">${s && s.picture ? pic : label}<span class="num">${i.id}</span><span class="tally" id="tally-${i.id}"></span></div>
+        <div class="meta">
+          <div class="nm"><input value="${esc(i.name)}" data-rename="${i.id}" title="Name on Big (up to 20 letters)" maxlength="20">
+            <input class="short" value="${esc(i.short)}" data-short="${i.id}" title="Short name on Big (4 letters)" maxlength="4"></div>
+          <select data-link="${i.id}" title="Which app camera is plugged into this input">
+            <option value="">This is… (not an app camera)</option>
+            ${camOpts.map(c => `<option value="${c.id}" ${linkOf[i.id] === c.id ? 'selected' : ''}>This is ${esc(c.name)}</option>`).join('')}
+          </select>
+        </div></div>`;
+    }).join('');
+    document.querySelectorAll('#bigInputs input').forEach(inp => {
+      inp.oninput = () => inp.classList.add('dirty');
+      inp.onkeydown = async e => {
+        if (e.key !== 'Enter') return;
+        const n = inp.dataset.rename || inp.dataset.short;
+        const name = document.querySelector(`[data-rename="${n}"]`).value.trim();
+        const short = document.querySelector(`[data-short="${n}"]`).value.trim();
+        const { ok, j } = await call(`/api/big/rename?input=${n}&name=${encodeURIComponent(name)}&short=${encodeURIComponent(short)}`);
+        if (ok) { toast(`Input ${n} is now "${j.name}" (${j.short}) on Big`); inp.blur(); bigBuilt = ''; refreshBig(); }
+      };
+    });
+    document.querySelectorAll('#bigInputs select').forEach(sel => sel.onchange = async () => {
+      const n = sel.dataset.link, cam = sel.value;
+      if (cam) await call(`/api/big/link?camera=${cam}&input=${n}`);
+      else { const prev = linkOf[n]; if (prev) await call(`/api/big/link?camera=${prev}`); }
+      bigBuilt = ''; refreshBig();
+    });
+  }
+  for (const i of d.inputs) {
+    const box = $('#inp-' + i.id), t = $('#tally-' + i.id); if (!box) continue;
+    const pgm = me.program === i.id, pvw = me.preview === i.id;
+    box.classList.toggle('pgm', pgm); box.classList.toggle('pvw', pvw && !pgm);
+    t.className = 'tally ' + (pgm ? 'pgm' : pvw ? 'pvw' : ''); t.textContent = pgm ? 'PGM' : pvw ? 'PVW' : '';
+  }
+}
+$('#bigStills').onclick = async () => {
+  if (!confirm("This cuts Big's program (M/E 1) through every input, one at a time, for about a minute and a half, then puts it back.\n\nOnly do this when nothing is live. Go ahead?")) return;
+  $('#bigStills').disabled = true; $('#bigStills').textContent = 'Taking pictures…';
+  toast('Taking a picture of every Big input (about 90 seconds)…');
+  const { ok, j } = await call('/api/big/stills?confirm=1');
+  if (ok) toast(`Done: ${Object.values(j.inputs).filter(v => v.picture).length} inputs have a picture`);
+  bigBuilt = ''; refreshBig();
+};
+
 $('#tuneReset').onclick = async () => {
   if (!confirm('Put every tracking setting back to its starting value?')) return;
   await fetch('/api/tuning/reset', { method: 'POST' }); loadTuning(); toast('Settings reset');
@@ -340,7 +448,8 @@ $('#stopAll').onclick = async () => {
 $('#deckSw').onchange = e => post('/api/deck?on=' + (e.target.checked ? 1 : 0));
 $('#lockBtn').onclick = () => post(unlocked ? '/api/moves/lock' : '/api/moves/unlock');
 loadTuning();
-refresh().then(refreshTrack).then(refreshPics);
+refresh().then(refreshTrack).then(refreshPics).then(refreshBig);
+setInterval(() => { if (!document.hidden) refreshBig(); }, 5000);
 setInterval(refresh, 3000);
 setInterval(() => { if (!document.hidden) { refreshTrack(); refreshTrackPics(); } }, 700);
 setInterval(() => { if (!document.hidden) refreshPics(); }, 6000);
