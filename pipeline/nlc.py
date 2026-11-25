@@ -13,6 +13,7 @@ This script does everything deterministic around that:
   python pipeline/nlc.py carousel    --date YYYY-MM-DD     designed carousel (pastor cover + series art) + caption
   python pipeline/nlc.py upload      --date YYYY-MM-DD     upload the sermon video to YouTube
   python pipeline/nlc.py drive-link  --path "G:\Shared drives\..."   Google Drive link for a synced folder or file
+  python pipeline/nlc.py cleanup     [--date YYYY-MM-DD] [--dry-run]  recycle work files/slides/timelines older than 4 weeks
 
 Everything for one Sunday lives in work/<date>/ (gitignored).
 """
@@ -861,10 +862,12 @@ def cmd_carousel(a):
     s = H * 0.64 / cut.height
     c = cut.resize((int(cut.width * s), int(cut.height * s)), Image.LANCZOS)
     pos = (int(W * float(info.get("carousel_pastor_at", 0.66)) - face_x * s), H - c.height - 190)
-    halo = c.split()[3].filter(ImageFilter.MaxFilter(11)).filter(ImageFilter.GaussianBlur(22))
-    glow = Image.new("RGBA", c.size, (255, 190, 110, 0))
-    glow.putalpha(halo.point(lambda v: min(255, int(v * 1.2))))
-    img.alpha_composite(glow, pos)
+    # No glow/halo around him (the pastor asked: it read as "angelic"). Just a soft,
+    # dark contact shadow so the cutout sits naturally on the background.
+    soft = c.split()[3].filter(ImageFilter.GaussianBlur(10))
+    shadow = Image.new("RGBA", c.size, (0, 0, 0, 0))
+    shadow.putalpha(soft.point(lambda v: int(v * 0.35)))
+    img.alpha_composite(shadow, pos)
     img.alpha_composite(c, pos)
     # deepen the bottom again over his sweater so the title reads
     low = Image.linear_gradient("L").resize((W, H)).point(lambda v: int(235 * max(0, (v - 175) / 80)))
@@ -1420,17 +1423,18 @@ def cmd_thumbnail(a):
         wash.putpixel((x, 0), int(185 * min(1, max(0, (u - 0.40) / 0.22))))
     img = Image.composite(Image.new("RGBA", (W, H), (12, 6, 2, 255)), img, wash.resize((W, H)))
 
-    # Place him: height ~106% of the frame, face at pastor_at across; warm rim glow behind.
+    # Place him: height ~106% of the frame, face at pastor_at across. No glow/halo (the pastor
+    # asked, Nov 2026 — it read as "angelic"); just a soft dark shadow so the cutout sits naturally.
     s = H * 1.06 / cut.height
     c = cut.resize((int(cut.width * s), int(cut.height * s)), Image.LANCZOS)
     face_in_c = face_x * s
     at = float(th.get("pastor_at", 0.2))
     px = int((at * W if side == "left" else (1 - at) * W) - face_in_c)
     pos = (px, H - c.height + 24)
-    a_ = c.split()[3].filter(ImageFilter.MaxFilter(9)).filter(ImageFilter.GaussianBlur(16))
-    glow = Image.new("RGBA", c.size, (255, 175, 90, 0))
-    glow.putalpha(a_.point(lambda v: min(255, int(v * 1.3))))
-    img.alpha_composite(glow, pos)
+    soft = c.split()[3].filter(ImageFilter.GaussianBlur(8))
+    shadow = Image.new("RGBA", c.size, (0, 0, 0, 0))
+    shadow.putalpha(soft.point(lambda v: int(v * 0.35)))
+    img.alpha_composite(shadow, pos)
     img.alpha_composite(c, pos)
 
     d = ImageDraw.Draw(img)
@@ -1504,6 +1508,86 @@ def set_thumbnail(api, video_id, path):
         return f"failed: {e}"
 
 
+# ---------------------------------------------------------------- cleanup
+
+KEEP_WEEKS = 4
+DATED = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+
+def to_recycle_bin(path):
+    """Delete via the Windows shell with undo allowed: local files go to the Recycle Bin;
+    on the Google Drive (G:) the deletion syncs to Drive's Trash (kept 30 days)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT),
+                    ("pFrom", wintypes.LPCWSTR), ("pTo", wintypes.LPCWSTR),
+                    ("fFlags", ctypes.c_uint16), ("fAnyOperationsAborted", wintypes.BOOL),
+                    ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", wintypes.LPCWSTR)]
+    FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x4, 0x10, 0x40, 0x400
+    op = SHFILEOPSTRUCTW(None, FO_DELETE, str(path) + "\0\0", None,
+                         FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI, False, None, None)
+    rc = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    if rc or op.fAnyOperationsAborted:
+        raise OSError(f"could not delete {path} (code {rc})")
+
+
+def cmd_cleanup(a):
+    """Keep the last 4 weeks; recycle anything dated earlier. Reference = --date or the most
+    recent Sunday. E.g. Sunday 2026-11-15 -> everything dated before 2026-10-18 goes.
+      * laptop work/<date>/: everything EXCEPT the small .json records (done.json must stay,
+        or `pending` would re-process that Sunday if the recording is still on the X6)
+      * Media\\Instagram Slides\\<date>  and  Media\\Editing Projects\\<date> - Resolve timeline
+    Never touched: Sermon MP3s, Sermons videos, Worship song videos, Practice files,
+    and undated work folders (voices, practice, backfill...)."""
+    if a.date:
+        ref = dt.date.fromisoformat(a.date)
+    else:
+        today = dt.date.today()
+        ref = today - dt.timedelta(days=(today.weekday() + 1) % 7)  # most recent Sunday
+    cutoff = ref - dt.timedelta(weeks=KEEP_WEEKS)
+    log(f"Keeping {cutoff} and later; removing older ({'DRY RUN' if a.dry_run else 'to Recycle Bin / Drive Trash'}).")
+
+    def old(name):
+        m = DATED.match(name)
+        if not m:
+            return False
+        try:
+            return dt.date.fromisoformat(m.group(1)) < cutoff
+        except ValueError:
+            return False
+
+    targets = []
+    for d in sorted(WORK.iterdir()):
+        if d.is_dir() and DATED.fullmatch(d.name) and old(d.name):
+            targets += [p for p in sorted(d.iterdir()) if not (p.is_file() and p.suffix.lower() == ".json")]
+    media = Path(CONFIG["media_folder"])
+    for sub in ("Instagram Slides", "Editing Projects"):
+        folder = media / sub
+        if folder.exists():
+            targets += [p for p in sorted(folder.iterdir()) if old(p.name)]
+
+    freed, failed = 0, []
+    for p in targets:
+        size = sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) if p.is_dir() else p.stat().st_size
+        log(f"  {'would remove' if a.dry_run else 'removing'}  {p}  ({size / 1e6:,.0f} MB)")
+        if a.dry_run:
+            freed += size
+            continue
+        try:
+            to_recycle_bin(p)
+            freed += size
+        except OSError as e:
+            failed.append(str(p))
+            log(f"    FAILED: {e}")
+    log(f"{'Would free' if a.dry_run else 'Freed'} {freed / 1e9:.1f} GB from {len(targets) - len(failed)} item(s)."
+        + (f" {len(failed)} failed." if failed else ""))
+    save_json(WORK / "cleanup_last.json", {"ref": ref.isoformat(), "cutoff": cutoff.isoformat(),
+                                           "dry_run": a.dry_run, "removed": len(targets) - len(failed),
+                                           "gb": round(freed / 1e9, 1), "failed": failed})
+
+
 # ---------------------------------------------------------------- main
 
 def main():
@@ -1511,8 +1595,10 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("find", "notes", "transcribe", "audiomap", "render", "slides", "upload",
                  "youtube-login", "opus-upload", "pending", "drive-link",
-                 "thumbnail", "thumb-frames", "live", "carousel"):
+                 "thumbnail", "thumb-frames", "live", "carousel", "cleanup"):
         p = sub.add_parser(name)
+        if name == "cleanup":
+            p.add_argument("--dry-run", action="store_true", help="list what would go, delete nothing")
         if name == "pending":
             p.add_argument("--claim", action="store_true", help="mark the recording as being worked on")
         if name == "drive-link":

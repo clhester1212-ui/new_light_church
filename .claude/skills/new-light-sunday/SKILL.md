@@ -176,7 +176,7 @@ it, and re-read the transcript around every cut once more.
 ## Step 4b — YouTube thumbnail (every week)
 
 Style (approved Oct 26, 2026, "Combined A"): the pastor **cut out** of a real,
-sharpened camera frame, waist-up on the left with a warm glow, in front of the **series
+sharpened camera frame, waist-up on the left (no glow or halo around him — he asked, Nov 16, 2026), in front of the **series
 artwork** (crisp, dimmed); the series logo as a badge top-right; the big hook caption below it.
 Example: `work\2026-10-25\thumbnail.jpg`.
 1. `pipeline\nlc.cmd thumb-frames --date <date>` → contact sheets
@@ -292,7 +292,9 @@ test mode) → `work\<date>\carousel_1.jpg … carousel_6.jpg` + `instagram_capt
 into the same Instagram Slides folder as `<date> - Carousel <n>.jpg` and
 `<date> - Instagram caption.txt` (the plain slides stay too, so they can be edited by hand).
 Slide 1 = cover: the pastor in front of the series art, the series logo, the message title,
-speaker · series · week. Slides 2–6 = the 5 plan slides, on one panorama of the series
+speaker · series · week. **No glow or halo around the pastor** (he asked, Nov 16, 2026 — it made
+him look "angelic"); the code uses only a soft dark shadow. Don't add glow, rim light or a
+bright outline back. Slides 2–6 = the 5 plan slides, on one panorama of the series
 background that flows across the swipe, inside a thin gold double frame, the `*key word*` in
 the accent color, the series logo at the bottom. **Look at all six**: nothing cut off, the
 pastor's cut-out clean, the title balanced, the highlight on the right word. Fix plan.json and re-run.
@@ -397,6 +399,16 @@ If it errors (Francis not set up, token revoked), mention that in the email inst
 on — Slack never blocks the run.
 
 Then write `work\<date>\done.json` with the results and delete `work\<date>\running.json`.
+
+**4-week cleanup (every run, after done.json; standing request from Nov 16, 2026)**: run
+`cmd /c "C:\Users\NewLight\new_light_church\pipeline\nlc.cmd cleanup"`. It keeps the most recent
+Sunday and the 4 weeks before it (e.g. Sunday Nov 15 → keeps Oct 18 and later) and sends older
+items to the Recycle Bin / Drive Trash: the laptop's `work\<date>\` files (keeping the small
+.json records — done.json must stay so old Sundays aren't re-processed), `Media\Instagram
+Slides\<date>` and `Media\Editing Projects\<date> - Resolve timeline`. It never touches Sermon
+MP3s, sermon videos, Worship song videos or Practice files — keep it that way. Add one line to
+the email/Slack report ("Cleanup: removed items dated before <cutoff>, freed X GB"); a cleanup
+failure never blocks the run. Skip in test mode.
 
 If any step fails in a way not covered above, still send the email explaining plainly what
 failed and what did get done, then still write `done.json` (with `"status": "failed"`) so the
