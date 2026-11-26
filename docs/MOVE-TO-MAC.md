@@ -14,7 +14,7 @@ Keep the PC running every Sunday until the Mac has done one full Sunday on its o
 | **03 Companion (Stream Deck)** | `db.sqlite`, Companion's whole setup: all 9 pages, every button, the ATEM / Mini / camera connections. | 1 MB |
 | **04 ATEM and Mini backups** | `New Light Backups/` (every dated backup, including "2026-11-25 Ready for Sunday" with the ATEM's restorable `.xml`) and `ATEM Autosave/`. | 80 MB |
 | **05 Cameras app data** | The New Light Cameras app's database, tuning, stage edges, camera-to-ATEM links and the AI model. *Not* the rehearsal test videos (see section 5). | ~5 MB |
-| **06 Work folder** | All 29 GB of `work/`: every past Sunday's files, singer voice profiles, practice logs, Slack bot history, thumbnail ideas. | 29 GB |
+| **06 Work folder** | The parts of `work/` worth keeping: singer voice profiles, practice files, thumbnail ideas, Slack bot history, and every Sunday's small records (`done.json` etc., which stop old Sundays from being re-processed) and logs. The big working files from past Sundays (27 GB of videos, audio and renders) were left on the PC. They can all be remade, and the 4-week cleanup removes them anyway. | 3 GB |
 | **07 Windows setup reference** | The PC's scheduled tasks (as XML), startup programs, installed software, Python packages and tool versions. Just for reference when setting up the Mac. | small |
 
 **The code itself** is on GitHub: `https://github.com/clhester1212-ui/new_light_church`.
@@ -78,6 +78,9 @@ Claude should do these, one at a time, testing each:
   no pictures) are in `05 Cameras app data/data/sessions`.
 - **The four secret files** (section 2): they go through the password manager instead.
 
+- **Big working files from past Sundays** (about 27 GB in `work/<date>/`, `work/backfill`, `work/mp3backfill`): left on the PC
+  to save upload time. The finished sermon videos, MP3s, song videos and clips are already in Google Drive and YouTube.
+
 ## 6. Not on this PC at all (nothing to move)
 
 - The ATEM, the Mini, the cameras and the Stream Decks keep their own settings. The Mac only has to reach them on the network
@@ -89,4 +92,4 @@ Claude should do these, one at a time, testing each:
 - [ ] The Mac ran one full Sunday by itself: recording name set at 6 am, the Stream Deck worked during the service, and the noon routine made the video, MP3, clips and email.
 - [ ] Wednesday practice files were made on the Mac.
 - [ ] Francis answers in Slack from the Mac.
-- [ ] Re-copy anything new in `work/` since this backup (Claude can do a final sync).
+- [ ] Re-copy any new small records, voice profiles or practice files from `work/` since this backup (Claude can do a final sync).
