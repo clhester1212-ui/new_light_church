@@ -1,11 +1,11 @@
-"""Big = the ATEM 2 M/E Constellation HD. Its input names, program/preview, and a still of every input.
+"""The ATEM (2 M/E Constellation HD). Its input names, program/preview, and a still of every input.
 
-Big can't send live video over the network, so the app shows stills: tools/big_atem.js cuts
+The ATEM can't send live video over the network, so the app shows stills: tools/big_atem.js cuts
 M/E 1 program through each input, captures a still, and puts program back. That cut is visible
-on Big's output, so it's a setup-only button.
+on the ATEM's output, so it's a setup-only button.
 
 Settings live in data/big.json: {"ip": "...", "links": {"stage": 2, "left": 18, "right": 20}}.
-"links" says which Big input each app camera is plugged into.
+"links" says which ATEM input each app camera is plugged into.
 """
 from __future__ import annotations
 
@@ -56,12 +56,12 @@ def _ffmpeg() -> str | None:
 def _run(*args: str, timeout: float = 15) -> dict:
     node = _node()
     if not node:
-        return {"error": "Can't find Companion's Node (needed to talk to Big)."}
+        return {"error": "Can't find Companion's Node (needed to talk to the ATEM)."}
     try:
         p = subprocess.run([node, str(HELPER), config()["ip"], *args], capture_output=True, text=True,
                            timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:
-        return {"error": "Big took too long to answer."}
+        return {"error": "The ATEM took too long to answer."}
     try:
         return json.loads(p.stdout.strip().splitlines()[-1])
     except (IndexError, json.JSONDecodeError):
@@ -69,7 +69,7 @@ def _run(*args: str, timeout: float = 15) -> dict:
 
 
 def status(max_age: float = 4.0) -> dict:
-    """Big's input names and program/preview, at most a few seconds old."""
+    """The ATEM's input names and program/preview, at most a few seconds old."""
     with _lock:
         if _cache["data"] is None or time.time() - _cache["at"] > max_age:
             _cache["data"], _cache["at"] = _run("status"), time.time()

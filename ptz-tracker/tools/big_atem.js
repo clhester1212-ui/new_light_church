@@ -1,4 +1,4 @@
-// Talks to "Big" (the ATEM 2 M/E Constellation HD) for the New Light Cameras app.
+// Talks to the ATEM (2 M/E Constellation HD) for the New Light Cameras app.
 // Runs on Companion's bundled Node with the atem-connection library from Companion's ATEM
 // module, so nothing extra has to be installed.
 //
@@ -6,7 +6,7 @@
 //   node big_atem.js <ip> rename <input> <long> <short>
 //   node big_atem.js <ip> stills <outdir> <ffmpeg>   -> a still of every camera input (inNN.jpg + stills.json)
 //
-// Big can't send live video over the network. It CAN capture a still of its M/E 1 program into
+// The ATEM can't send live video over the network. It CAN capture a still of its M/E 1 program into
 // the media pool and hand it over, so "stills" cuts M/E 1 program through every input in turn
 // (about 4 s each) and puts the original program back at the end. Setup only, never during a service.
 const fs = require('fs')
@@ -25,7 +25,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const out = (obj) => { process.stdout.write(JSON.stringify(obj)); process.exit(0) }
 const fail = (msg) => { process.stdout.write(JSON.stringify({ error: msg })); process.exit(1) }
 
-// The library's own RGBA conversion crashes on Big's stills (alpha out of range), so convert here.
+// The library's own RGBA conversion crashes on the ATEM's stills (alpha out of range), so convert here.
 const clamp = (v) => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v))
 function yuvToRgb(data) {
   const rgb = Buffer.alloc((data.length / 4) * 3)
@@ -43,7 +43,7 @@ function yuvToRgb(data) {
 }
 
 const atem = new Atem({ disableMultithreaded: true })
-setTimeout(() => fail(`Big didn't answer at ${ip}`), cmd === 'stills' ? 240000 : 8000)
+setTimeout(() => fail(`The ATEM didn't answer at ${ip}`), cmd === 'stills' ? 240000 : 8000)
 
 atem.on('connected', async () => {
   await wait(600)
@@ -70,7 +70,20 @@ atem.on('connected', async () => {
       const used = () => atem.state.media.stillPool.map((p, i) => (p && p.isUsed ? i : -1)).filter((i) => i >= 0)
       const before0 = new Set(used())
       const orig = { program: s.video.mixEffects[0].programInput, preview: s.video.mixEffects[0].previewInput }
+      // The still is the PROGRAM picture, keys included, so take every M/E 1 upstream key and
+      // every downstream key off air while scanning (otherwise lyrics show on every input),
+      // and put them back exactly as they were at the end.
+      const uskOn = s.video.mixEffects[0].upstreamKeyers.map((k) => !!(k && k.onAir))
+      const dskOn = s.video.downstreamKeyers.map((k) => !!(k && k.onAir))
+      const restoreKeys = async () => {
+        for (const [i, on] of uskOn.entries()) if (on) await atem.setUpstreamKeyerOnAir(true, 0, i)
+        for (const [i, on] of dskOn.entries()) if (on) await atem.setDownstreamKeyOnAir(true, i)
+      }
+      for (const [i, on] of uskOn.entries()) if (on) await atem.setUpstreamKeyerOnAir(false, 0, i)
+      for (const [i, on] of dskOn.entries()) if (on) await atem.setDownstreamKeyOnAir(false, i)
+      await wait(400)
       const result = {}
+      try {
       for (const inp of cameraInputs) {
         const n = inp.inputId
         await atem.changeProgramInput(n, 0)
@@ -96,12 +109,15 @@ atem.on('connected', async () => {
         execFileSync(ffmpeg, ['-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `1920x${rgb.length / 3 / 1920}`,
           '-i', tmp, '-vf', 'scale=480:-2', '-q:v', '4', path.join(dir, file)])
         fs.unlinkSync(tmp)
-        result[n] = { file, brightness, picture: brightness > 8 }
+        result[n] = { file, brightness, picture: brightness > 3 }
         await wait(300)
       }
-      await atem.changeProgramInput(orig.program, 0)
-      await atem.changePreviewInput(orig.preview, 0)
-      await wait(400)
+      } finally {
+        await atem.changeProgramInput(orig.program, 0)
+        await atem.changePreviewInput(orig.preview, 0)
+        await restoreKeys()
+        await wait(400)
+      }
       const summary = { taken: Date.now() / 1000, videoMode: s.settings.videoMode, inputs: result }
       fs.writeFileSync(path.join(dir, 'stills.json'), JSON.stringify(summary, null, 1))
       out(summary)

@@ -134,7 +134,7 @@ class Handler(BaseHTTPRequestHandler):
                                "reply_port_ok": transport().listening})
         if parts == ["api", "events"]:
             return self._json(db.recent_events())
-        # Big (ATEM 2 M/E Constellation HD): input names, program/preview, stills
+        # The ATEM (2 M/E Constellation HD): input names, program/preview, stills
         if parts == ["api", "big"]:
             return self._json(big.status())
         if len(parts) == 4 and parts[:3] == ["api", "big", "still"]:
@@ -181,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
             db.log_event(None, "Stream Deck control " + ("on" if on else "off"))
             return self._json({"ok": True, "deck_enabled": on})
 
-        # Big: rename an input, link it to an app camera, or take a still of every input.
+        # The ATEM: rename an input, link it to an app camera, or take a still of every input.
         if parts == ["api", "big", "rename"]:
             try:
                 n = int(q.get("input", ""))
@@ -194,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
             res = big.rename(n, name, short)
             if res.get("error"):
                 return self._json(res, 503)
-            db.log_event(None, "Big input renamed", f"{n} = {res['name']} ({res['short']})")
+            db.log_event(None, "ATEM input renamed", f"{n} = {res['name']} ({res['short']})")
             return self._json(res)
         if parts == ["api", "big", "link"]:
             cam_id = q.get("camera", "")
@@ -202,17 +202,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "no such camera"}, 404)
             n = int(q["input"]) if q.get("input", "").isdigit() else None
             links = big.link(cam_id, n)
-            db.log_event(cam_id, "Big input link", f"input {n}" if n else "unlinked")
+            db.log_event(cam_id, "ATEM input link", f"input {n}" if n else "unlinked")
             return self._json({"ok": True, "links": links})
         if parts == ["api", "big", "stills"]:
             if q.get("confirm") != "1":
-                return self._json({"error": "This cuts Big's program through every input. Add confirm=1."}, 400)
-            db.log_event(None, "Big input pictures", "started")
+                return self._json({"error": "This cuts the ATEM's program through every input. Add confirm=1."}, 400)
+            db.log_event(None, "ATEM input pictures", "started")
             res = big.take_stills()
             if res.get("error"):
                 return self._json(res, 503)
             seen = sum(1 for v in res["inputs"].values() if v.get("picture"))
-            db.log_event(None, "Big input pictures", f"{seen} inputs with a picture")
+            db.log_event(None, "ATEM input pictures", f"{seen} inputs with a picture")
             return self._json(res)
 
         # Live tuning: POST /api/tuning?catch_up_x=2.0&dead_start_x=0.12   or   /api/tuning/reset
