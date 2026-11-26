@@ -41,7 +41,8 @@ If the YouTube sign-in doesn't carry over, sign in again on the Mac. It takes a 
    Blackmagic ATEM Switchers software (ATEM Software Control + ATEM Setup), Elgato Stream Deck, Python 3.12, ffmpeg (`brew install ffmpeg`),
    Git, Node (Companion brings its own), DaVinci Resolve, Dropbox (the sermon notes and props live in Dropbox).
    The full PC list is in `07 Windows setup reference/installed programs.txt`.
-3. **Get the code:** `git clone https://github.com/clhester1212-ui/new_light_church` and `git checkout ptz-tracker`.
+3. **Get the code:** `git clone https://github.com/clhester1212-ui/new_light_church` and `git checkout mac-port`
+   (the **mac-port** branch = everything on `ptz-tracker` plus the Mac changes in section 4). Then follow `mac/README.md`.
 4. **Put the secrets back** in `new_light_church/secrets/` from the password manager (section 2).
 5. **Copy the work folder** from Drive `06 Work folder/work` into `new_light_church/work`.
 6. **Copy the Cameras app data** from Drive `05 Cameras app data/data` and `models` into `new_light_church/ptz-tracker/`.
@@ -53,7 +54,8 @@ If the YouTube sign-in doesn't carry over, sign in again on the Mac. It takes a 
 
 ## 4. Things that are Windows-only and must change for the Mac
 
-Claude should do these, one at a time, testing each:
+**Done on the `mac-port` branch (2026-11-25)** and checked on the PC: the PC behaves exactly as before. Not yet run on a real Mac.
+What still needs doing on the Mac is in `mac/README.md` ("Not yet converted"). The list below says what changed:
 
 - **Folder paths in `config.json`:** `C:\Users\NewLight\Dropbox\…` and `G:\Shared drives\…` become the Mac's
   Dropbox and Google Drive paths (for example `~/Library/CloudStorage/GoogleDrive-…/Shared drives/…`).

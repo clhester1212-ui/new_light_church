@@ -13,7 +13,11 @@ const fs = require('fs')
 const path = require('path')
 const { execFileSync } = require('child_process')
 
-const mods = path.join(process.env.APPDATA, 'companion', 'modules')
+// Companion's modules: %APPDATA%\companion\modules on the PC,
+// ~/Library/Application Support/companion/modules on the Mac.
+const mods = process.platform === 'darwin'
+  ? path.join(require('os').homedir(), 'Library', 'Application Support', 'companion', 'modules')
+  : path.join(process.env.APPDATA, 'companion', 'modules')
 const modDir = fs.readdirSync(mods).filter((d) => d.startsWith('bmd-atem-'))
   .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop()
 const LIB = path.join(mods, modDir, 'node_modules', 'atem-connection')

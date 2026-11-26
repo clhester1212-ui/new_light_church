@@ -1,0 +1,23 @@
+# Python packages the New Light programs use (taken from the booth PC, 2026-11-25).
+# On the Mac:  python3.12 -m venv .venv && .venv/bin/pip install -r mac/requirements.txt
+# torch/torchaudio: plain versions here (the PC used the "+cpu" Windows builds).
+demucs==4.1.0
+faster-whisper==1.2.1
+google-api-python-client==2.201.0
+google-auth==2.59.1
+google-auth-httplib2==0.4.4
+google-auth-oauthlib==1.5.0
+lameenc==1.9.0
+numpy==2.5.3
+onnxruntime==1.30.0
+pillow==12.3.0
+rembg==2.0.86
+requests==2.34.2
+scikit-learn==1.9.1
+scipy==1.18.1
+slack_bolt==1.30.0
+slack_sdk==3.45.0
+soundfile==0.14.0
+speechbrain==1.1.2
+torch==2.14.1
+torchaudio==2.11.0

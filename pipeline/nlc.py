@@ -29,7 +29,11 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import platform_paths  # noqa: E402  (PC vs Mac differences)
+
+# config.json keeps its Windows paths; on a Mac they're translated to the Mac's folders.
+CONFIG = platform_paths.localize(json.loads((ROOT / "config.json").read_text(encoding="utf-8")))
 WORK = ROOT / "work"
 
 
@@ -119,22 +123,10 @@ def date_in_name(name):
 
 
 def search_roots():
-    roots = []
     # Every attached drive whose volume label matches (both Crucial X6 drives share a name,
-    # and either one may be plugged in on a given Sunday).
-    for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
-        drive = f"{letter}:\\"
-        if not os.path.exists(drive):
-            continue
-        try:
-            import ctypes
-            buf = ctypes.create_unicode_buffer(256)
-            ctypes.windll.kernel32.GetVolumeInformationW(drive, buf, 256, None, None, None, None, 0)
-            label = buf.value
-        except Exception:
-            label = ""
-        if label in CONFIG["recording_drive_labels"]:
-            roots.append(Path(drive))
+    # and either one may be plugged in on a given Sunday). Drive letters on the PC,
+    # /Volumes/<name> on the Mac.
+    roots = platform_paths.recording_drives(CONFIG["recording_drive_labels"])
     roots += [Path(p) for p in CONFIG["recording_folders"]]
     return [r for r in roots if r.exists()]
 
@@ -1184,8 +1176,8 @@ def drive_cloud_id(path):
     Returns None until Drive has finished uploading the folder."""
     import glob
     import sqlite3
-    rel = Path(path).resolve().relative_to(Path("G:/Shared drives")).parts  # (drive, sub, ...)
-    for db in glob.glob(os.path.expandvars(r"%LOCALAPPDATA%\Google\DriveFS\*\metadata_sqlite_db")):
+    rel = Path(path).resolve().relative_to(platform_paths.shared_drives_root(CONFIG).resolve()).parts  # (drive, sub, ...)
+    for db in platform_paths.drivefs_metadata_dbs():
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         try:
             row = con.execute("SELECT stable_id, id FROM items WHERE local_title=? AND is_folder=1 "
@@ -1515,22 +1507,9 @@ DATED = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 
 
 def to_recycle_bin(path):
-    """Delete via the Windows shell with undo allowed: local files go to the Recycle Bin;
-    on the Google Drive (G:) the deletion syncs to Drive's Trash (kept 30 days)."""
-    import ctypes
-    from ctypes import wintypes
-
-    class SHFILEOPSTRUCTW(ctypes.Structure):
-        _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT),
-                    ("pFrom", wintypes.LPCWSTR), ("pTo", wintypes.LPCWSTR),
-                    ("fFlags", ctypes.c_uint16), ("fAnyOperationsAborted", wintypes.BOOL),
-                    ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", wintypes.LPCWSTR)]
-    FO_DELETE, FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 3, 0x4, 0x10, 0x40, 0x400
-    op = SHFILEOPSTRUCTW(None, FO_DELETE, str(path) + "\0\0", None,
-                         FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI, False, None, None)
-    rc = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
-    if rc or op.fAnyOperationsAborted:
-        raise OSError(f"could not delete {path} (code {rc})")
+    """Delete with undo allowed: Recycle Bin on the PC, Trash on the Mac. On Google Drive the
+    deletion syncs to Drive's Trash (kept 30 days)."""
+    platform_paths.move_to_trash(path)
 
 
 def cmd_cleanup(a):

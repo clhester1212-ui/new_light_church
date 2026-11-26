@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Sundays 6:00 am: name the Mini recording Worship_M_D_YYYY (PC task "New Light - ATEM Worship name"). -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>org.newlightchurch.atem-worship-name</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/pipeline/atem_name.sh</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>StartCalendarInterval</key>
+  <dict><key>Weekday</key><integer>0</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>__REPO__/work/launchd-atem-worship-name.log</string>
+  <key>StandardErrorPath</key><string>__REPO__/work/launchd-atem-worship-name.log</string>
+</dict>
+</plist>

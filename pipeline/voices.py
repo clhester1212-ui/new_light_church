@@ -20,6 +20,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from nlc import CONFIG, WORK, hms, log  # noqa: E402
+from platform_paths import localize_path  # noqa: E402
 
 VW = WORK / "voices"
 WIN, HOP = 4.0, 2.0          # fingerprint window / step, seconds
@@ -28,7 +29,7 @@ MATCH = 0.30                 # similarity (centered fingerprints) needed to call
 
 
 def worship_root():
-    return Path(CONFIG.get("worship_songs_folder", r"G:\Shared drives\Worship"))
+    return Path(CONFIG.get("worship_songs_folder") or localize_path(r"G:\Shared drives\Worship"))
 
 
 # ------------------------------------------------------------------ audio helpers

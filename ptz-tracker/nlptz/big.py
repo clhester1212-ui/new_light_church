@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -44,7 +45,13 @@ def save_config(cfg: dict) -> None:
 
 
 def _node() -> str | None:
-    found = sorted(glob.glob(r"C:\Program Files\Companion\resources\node-runtimes\node*\node.exe"))
+    """Companion's bundled Node: Program Files on the PC, inside Companion.app on the Mac."""
+    if sys.platform == "darwin":
+        pats = ["/Applications/Companion.app/Contents/Resources/node-runtimes/node*/bin/node",
+                "/Applications/Companion.app/Contents/Resources/node-runtimes/node*/node"]
+    else:
+        pats = [r"C:\Program Files\Companion\resources\node-runtimes\node*\node.exe"]
+    found = sorted(hit for p in pats for hit in glob.glob(p))
     return found[-1] if found else shutil.which("node")
 
 

@@ -13,7 +13,6 @@ work/francis.log, and starts it again a minute after it stops.
 """
 import glob
 import json
-import msvcrt
 import os
 import queue
 import shutil
@@ -67,6 +66,23 @@ def find_claude():
     exe = shutil.which("claude")
     if exe:
         return exe
+    if sys.platform == "darwin":
+        # Mac: the usual install spots (a start-at-login job gets a short PATH), then the
+        # copy bundled with the Claude desktop app.
+        home = os.path.expanduser("~")
+        patterns = [
+            os.path.join(home, ".local", "bin", "claude"),
+            os.path.join(home, ".claude", "local", "claude"),
+            "/opt/homebrew/bin/claude",
+            "/usr/local/bin/claude",
+            os.path.join(home, "Library", "Application Support", "Claude", "claude-code", "*", "*", "claude"),
+            os.path.join(home, "Library", "Application Support", "Claude", "claude-code", "*", "claude"),
+        ]
+        found = sorted({p for pat in patterns for p in glob.glob(pat) if os.access(p, os.X_OK)},
+                       key=os.path.getmtime)
+        if not found:
+            raise RuntimeError("Can't find claude. Is Claude Code / the Claude desktop app installed?")
+        return found[-1]
     # The Store version of the desktop app keeps its files under LocalCache, which only
     # the app itself sees as %APPDATA%\Claude; look in both places.
     patterns = [
@@ -183,7 +199,12 @@ def watchdog():
     os.makedirs(WORK, exist_ok=True)
     lock = open(LOCK, "w")
     try:
-        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         return  # another watchdog already has Francis running; two would answer twice
     while True:

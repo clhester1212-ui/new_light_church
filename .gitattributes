@@ -1,0 +1,4 @@
+# Mac shell scripts and job files must keep Unix line endings, even when checked out on Windows.
+*.sh text eol=lf
+*.plist text eol=lf
+mac/** text eol=lf

@@ -25,7 +25,11 @@ function log(msg) {
 
 function atemLib() {
   // Companion keeps the module in a versioned folder (bmd-atem-3.21.2); use the newest one.
-  const mods = path.join(process.env.APPDATA, 'companion', 'modules')
+  // Companion's modules: %APPDATA%\companion\modules on the PC,
+  // ~/Library/Application Support/companion/modules on the Mac.
+  const mods = process.platform === 'darwin'
+    ? path.join(require('os').homedir(), 'Library', 'Application Support', 'companion', 'modules')
+    : path.join(process.env.APPDATA, 'companion', 'modules')
   const dirs = fs.readdirSync(mods).filter((d) => d.startsWith('bmd-atem-'))
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
   if (!dirs.length) throw new Error(`No Companion ATEM module in ${mods}`)

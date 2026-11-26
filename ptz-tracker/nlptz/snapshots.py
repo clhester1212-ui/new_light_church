@@ -9,6 +9,7 @@ import glob
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 
@@ -21,8 +22,12 @@ def ffmpeg_path() -> str | None:
     found = shutil.which("ffmpeg")
     if found:
         return found
-    pattern = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg*\ffmpeg-*\bin\ffmpeg.exe")
-    hits = sorted(glob.glob(pattern))
+    # Not on PATH (a start-at-login app gets a short PATH): look where it's usually installed.
+    if sys.platform == "darwin":
+        patterns = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]   # Homebrew (Apple / Intel)
+    else:
+        patterns = [os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg*\ffmpeg-*\bin\ffmpeg.exe")]
+    hits = sorted(h for p in patterns for h in glob.glob(p))
     return hits[-1] if hits else None
 
 

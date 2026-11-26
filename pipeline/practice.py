@@ -24,13 +24,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from nlc import CONFIG, WORK, die, duration, ffmpeg, hms, log, mmss, safe_name, save_json, search_roots  # noqa: E402
+from platform_paths import localize_path  # noqa: E402
 
 PWORK = WORK / "practice"
 LOCK_HOURS = 6
 
 
 def out_root():
-    return Path(CONFIG.get("practice_folder", r"G:\Shared drives\Worship\Practice Worship Files"))
+    return Path(CONFIG.get("practice_folder") or localize_path(r"G:\Shared drives\Worship\Practice Worship Files"))
 
 
 def recordings():

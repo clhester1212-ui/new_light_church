@@ -20,11 +20,12 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from nlc import CONFIG, ROOT, drive_cloud_id, log  # noqa: E402
+from platform_paths import localize_path  # noqa: E402
 
 API = "https://api.planningcenteronline.com/services/v2"
 TAG = "[NLC media]"
-WORSHIP = Path(CONFIG.get("worship_songs_folder", r"G:\Shared drives\Worship"))
-SERMONS = Path(CONFIG.get("sermons_folder", r"G:\Shared drives\Sermons"))
+WORSHIP = Path(CONFIG.get("worship_songs_folder") or localize_path(r"G:\Shared drives\Worship"))
+SERMONS = Path(CONFIG.get("sermons_folder") or localize_path(r"G:\Shared drives\Sermons"))
 
 
 class PCO:
