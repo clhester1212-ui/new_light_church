@@ -11,7 +11,7 @@
   "recording_folders": [],
   "process_recordings_since": "2026-10-11",
   "min_recording_gb": 0.5,
-  "atem_hosts": {"ATEM Mini Extreme": "192.168.11.111"},
+  "atem_hosts": {"Mini": "192.168.11.139"},
   "sermon_notes_folder": "C:\\Users\\NewLight\\Dropbox\\Sound Booth\\Sermons",
 
   "worship_songs_folder": "G:\\Shared drives\\Worship",
